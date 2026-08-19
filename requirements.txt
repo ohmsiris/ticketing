@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+httpx>=0.26
+anthropic>=0.25
+apscheduler>=3.10
+python-dotenv>=1.0
