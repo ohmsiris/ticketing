@@ -59,6 +59,10 @@ def close_ticket_picker_prompt() -> str:
     return "จะปิดงานไหนครับ? เลือกจากด้านล่างได้เลย"
 
 
+def close_ticket_no_match_prompt() -> str:
+    return "ไม่พบงานที่ตรงกับที่พิมพ์มาครับ นี่คืองานที่เปิดอยู่ตอนนี้ เลือกได้เลยถ้าใช่งานใดงานหนึ่ง"
+
+
 # --- Unsupported input ---
 
 

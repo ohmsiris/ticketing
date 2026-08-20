@@ -48,7 +48,8 @@ this shape:
   "summary": "<cleaned-up short version of the issue, or null>",
   "due_date_days": <integer or null>,
   "due_date_calendar": "<YYYY-MM-DD or null>",
-  "close_ticket_id": <integer or null>
+  "close_ticket_id": <integer or null>,
+  "close_specific_no_match": <true or false>
 }}
 
 Rules:
@@ -85,16 +86,24 @@ this year, use next year instead. Example: if today is 2026-12-21 and \
 they say "5/1", that resolves to 2027-01-05 (next year), not 2026-01-05 \
 (already passed).
 - "close_ticket": the message says an issue is fixed/done/resolved/closed, \
-e.g. "ปิดงานนี้", "เสร็จแล้ว", "closed", "done with #14", "ปิด #3". If a \
-specific ticket number is mentioned, put it (as an integer) in \
-close_ticket_id. If no number is given but the message clearly describes \
-the content of exactly one ticket from this person's open-tickets list \
-(given in context below, if any), put THAT ticket's id in close_ticket_id \
-instead -- match by meaning, not exact wording. If it's not possible to \
-tell which one they mean (a generic message like "ปิดงาน"/"เสร็จแล้ว" with \
-nothing to match against, and more than one ticket is open), leave \
-close_ticket_id null -- the app handles picking from the list itself in \
-that case.
+e.g. "ปิดงานนี้", "เสร็จแล้ว", "closed", "done with #14", "ปิด #3", or a \
+past-tense completion report like "ถ่ายน้ำมันเครื่องเบอร์ 1 แล้ว" / \
+"เปลี่ยนลูกปืนเสร็จเรียบร้อยแล้ว" (no explicit "close" word needed -- \
+"แล้ว"/"เสร็จ(เรียบร้อย)แล้ว" on a task description is itself a completion \
+report). If a specific ticket number is mentioned, put it (as an integer) \
+in close_ticket_id. If no number is given but the message clearly \
+describes the content of exactly one ticket from this person's \
+open-tickets list (given in context below, if any), put THAT ticket's id \
+in close_ticket_id instead -- match by meaning, not exact wording. \
+Otherwise leave close_ticket_id null, and set close_specific_no_match: \
+  - true if the message described a specific task/item (not just a bare \
+"ปิดงาน"/"เสร็จแล้ว") but it does NOT match anything in the open-tickets \
+list -- e.g. they said a motor was fixed but nothing about a motor is \
+open. This matters even when only one ticket happens to be open: don't \
+guess that unrelated ticket is the one they mean.
+  - false if the message was generic with nothing to match against at all \
+(plain "ปิดงาน"/"เสร็จแล้ว") -- in that case, if only one ticket is open, \
+it's fine to assume that's the one.
 - "other": anything that doesn't clearly fit the above (small talk, \
 unclear, questions unrelated to tickets).
 - "department": which category the underlying issue belongs to -- only \
@@ -159,6 +168,7 @@ class Classification(TypedDict):
     due_date_days: Optional[int]
     due_date_calendar: Optional[str]
     close_ticket_id: Optional[int]
+    close_specific_no_match: bool
 
 
 def _default_classification() -> Classification:
@@ -169,6 +179,7 @@ def _default_classification() -> Classification:
         "due_date_days": None,
         "due_date_calendar": None,
         "close_ticket_id": None,
+        "close_specific_no_match": False,
     }
 
 
@@ -244,6 +255,7 @@ def classify(
             "due_date_days": parsed.get("due_date_days"),
             "due_date_calendar": parsed.get("due_date_calendar"),
             "close_ticket_id": parsed.get("close_ticket_id"),
+            "close_specific_no_match": bool(parsed.get("close_specific_no_match")),
         }
     except Exception:
         logger.exception("classification failed, defaulting to new_ticket")

@@ -146,18 +146,27 @@ def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter:
         reply_message(reply_token, [strings.no_open_ticket_to_close()])
         return
 
+    quick_reply = [
+        QuickReplyOption(label=_close_picker_label(t), text=f"ปิด #{t['id']}") for t in open_tickets_for_reporter
+    ]
+
+    # They described something specific ("ซ่อมมอเตอร์เสร็จแล้ว") but it
+    # didn't match any open ticket -- even if only one happens to be open,
+    # don't assume that unrelated one is the one they mean. Say so and let
+    # them pick if it's actually one of these after all.
+    if result.get("close_specific_no_match"):
+        reply_message(reply_token, [strings.close_ticket_no_match_prompt()], quick_reply=quick_reply)
+        return
+
     if len(open_tickets_for_reporter) == 1:
-        # Only one candidate -- unambiguous even without a match, no need
-        # to make them pick.
+        # Generic close phrase, nothing to match against, and only one
+        # candidate -- safe to assume that's the one.
         ticket = tickets.close_ticket_by_id(open_tickets_for_reporter[0]["id"], reporter)
         reply_message(reply_token, [strings.ticket_closed(ticket["id"])])
         return
 
     # More than one open ticket and nothing to tell them apart by -- ask via
     # tappable buttons instead of guessing which one they meant.
-    quick_reply = [
-        QuickReplyOption(label=_close_picker_label(t), text=f"ปิด #{t['id']}") for t in open_tickets_for_reporter
-    ]
     reply_message(reply_token, [strings.close_ticket_picker_prompt()], quick_reply=quick_reply)
 
 
