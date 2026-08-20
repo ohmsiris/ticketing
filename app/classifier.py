@@ -51,14 +51,21 @@ this shape:
 }}
 
 Rules:
-- "new_ticket": the message describes a new problem, issue, or task to track.
+- "new_ticket": the message describes a new problem, issue, or task to \
+track. If it ALSO states a due date/deadline in the same message (e.g. \
+"เปลี่ยนน้ำมันเครื่อง 27/9/69"), extract that date too -- fill \
+due_date_days or due_date_calendar exactly like you would for a \
+due_date_reply, using the date resolution rules below. If no date is \
+mentioned, leave both null.
 - "due_date_reply": the message answers a question about a deadline/due \
 date, e.g. "อีก 3 วัน", "อีก2วัน" (same thing, no spaces), "พรุ่งนี้", \
 "วันศุกร์หน้า", or an explicit date. If they gave a relative offset in \
 days, fill due_date_days with that integer and leave due_date_calendar \
 null. If they gave (or implied) a specific calendar date, resolve it to \
-YYYY-MM-DD and fill due_date_calendar, leaving due_date_days null. \
-Calendar date resolution rules:
+YYYY-MM-DD and fill due_date_calendar, leaving due_date_days null.
+
+Date resolution rules (for a due date mentioned in either a new_ticket or \
+a due_date_reply message):
   - Recognize Thai month names in any common form -- full, short, or \
 abbreviated with a period, all equivalent: มกราคม/มกรา/ม.ค., \
 กุมภาพันธ์/กุมภา/ก.พ., มีนาคม/มีนา/มี.ค., เมษายน/เมษา/เม.ย., \

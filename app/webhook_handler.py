@@ -63,7 +63,7 @@ def handle_message_event(event: dict) -> None:
     intent = result["intent"]
 
     if intent == "new_ticket":
-        _handle_new_ticket(reporter, text, result["department"], reply_token)
+        _handle_new_ticket(reporter, text, result, reply_token)
     elif intent == "due_date_reply":
         _handle_due_date_reply(reporter, result, reply_token)
     elif intent == "close_ticket":
@@ -72,19 +72,34 @@ def handle_message_event(event: dict) -> None:
         # classify() already normalizes unknown/"other" intents to
         # new_ticket, so this branch should be unreachable -- kept as a
         # safety net in case that contract ever changes.
-        _handle_new_ticket(reporter, text, result["department"], reply_token)
+        _handle_new_ticket(reporter, text, result, reply_token)
 
 
-def _handle_new_ticket(reporter: str, text: str, department: str, reply_token: str) -> None:
+def _handle_new_ticket(reporter: str, text: str, result: dict, reply_token: str) -> None:
+    department = result["department"]
     ticket_id = tickets.create_ticket(reporter, text, department)
     ticket_count = tickets.increment_ticket_count(reporter)
 
-    confirmation = strings.new_ticket_confirmation(ticket_id, department)
+    # If the message already stated its own due date (e.g. "เปลี่ยนน้ำมัน
+    # เครื่อง 27/9/69"), apply it right away instead of asking again -- same
+    # resolution + past-date guard as an explicit due_date_reply. An
+    # invalid/past embedded date is just ignored, falling back to asking.
+    due_date = tickets.resolve_due_date(result.get("due_date_days"), result.get("due_date_calendar"))
+    if due_date is not None and tickets.is_past_date(due_date):
+        due_date = None
+    if due_date is not None:
+        tickets.set_due_date(reporter, due_date)  # the ticket just created is the most recent open one, still due-date-less
+
+    if due_date is not None:
+        reply_texts = [strings.new_ticket_confirmation_with_due_date(ticket_id, text, department, due_date)]
+    else:
+        reply_texts = [strings.new_ticket_confirmation(ticket_id, department), strings.ask_due_date()]
+
     if reporter == "mom" and ticket_count <= ONBOARDING_TICKET_THRESHOLD:
         tip = strings.onboarding_first_ticket() if ticket_count == 1 else strings.onboarding_reminder_tip()
-        confirmation = f"{confirmation}\n{tip}"
+        reply_texts[0] = f"{reply_texts[0]}\n{tip}"
 
-    reply_message(reply_token, [confirmation, strings.ask_due_date()])
+    reply_message(reply_token, reply_texts)
 
 
 def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> None:

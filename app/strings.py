@@ -14,6 +14,12 @@ def new_ticket_confirmation(ticket_id: int, department: str) -> str:
     return f"✅ บันทึกแล้ว (#{ticket_id}) แผนก: {department}"
 
 
+def new_ticket_confirmation_with_due_date(ticket_id: int, message: str, department: str, due_date: str) -> str:
+    """Used when the due date was already stated in the same message that
+    created the ticket, so we skip asking for it separately."""
+    return f"✅ บันทึกแล้ว (#{ticket_id}) แผนก: {department}\n{_snippet(message)}\n📅 กำหนด: {due_date}"
+
+
 def ask_due_date() -> str:
     return "มีกำหนดวันไหมครับ? บอกเป็นจำนวนวัน หรือระบุวันที่ก็ได้"
 
