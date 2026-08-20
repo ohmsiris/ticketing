@@ -77,7 +77,12 @@ def handle_message_event(event: dict) -> None:
 
 def _handle_new_ticket(reporter: str, text: str, result: dict, reply_token: str) -> None:
     department = result["department"]
-    ticket_id = tickets.create_ticket(reporter, text, department)
+    # summary is the classifier's cleaned-up version (framing like "เตือนให้"
+    # and the due date itself stripped out) -- falls back to the raw text if
+    # the classifier didn't give one. Used for both storage (so digests get
+    # the benefit too) and this confirmation reply.
+    summary = result.get("summary") or text
+    ticket_id = tickets.create_ticket(reporter, text, department, summary)
     ticket_count = tickets.increment_ticket_count(reporter)
 
     # If the message already stated its own due date (e.g. "เปลี่ยนน้ำมัน
@@ -91,7 +96,7 @@ def _handle_new_ticket(reporter: str, text: str, result: dict, reply_token: str)
         tickets.set_due_date(reporter, due_date)  # the ticket just created is the most recent open one, still due-date-less
 
     if due_date is not None:
-        reply_texts = [strings.new_ticket_confirmation_with_due_date(ticket_id, text, department, due_date)]
+        reply_texts = [strings.new_ticket_confirmation_with_due_date(ticket_id, summary, department, due_date)]
     else:
         reply_texts = [strings.new_ticket_confirmation(ticket_id, department), strings.ask_due_date()]
 
@@ -117,7 +122,7 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
         reply_message(reply_token, [strings.no_ticket_needs_due_date()])
         return
 
-    reply_message(reply_token, [strings.due_date_set(ticket["id"], ticket["message"], due_date)])
+    reply_message(reply_token, [strings.due_date_set(ticket["id"], ticket["summary"] or ticket["message"], due_date)])
 
 
 def _handle_close_ticket(reporter: str, result: dict, reply_token: str) -> None:

@@ -50,12 +50,12 @@ def _row_to_dict(row) -> dict:
 # --- Tickets ---
 
 
-def create_ticket(reporter: str, message: str, department: str) -> int:
+def create_ticket(reporter: str, message: str, department: str, summary: Optional[str] = None) -> int:
     conn = get_conn()
     try:
         cur = conn.execute(
-            "INSERT INTO tickets (reporter, message, department, status, created_at) VALUES (?, ?, ?, 'open', ?)",
-            (reporter, message, department, _utc_now_iso()),
+            "INSERT INTO tickets (reporter, message, summary, department, status, created_at) VALUES (?, ?, ?, ?, 'open', ?)",
+            (reporter, message, summary, department, _utc_now_iso()),
         )
         conn.commit()
         return cur.lastrowid

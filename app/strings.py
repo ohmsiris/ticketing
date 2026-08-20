@@ -103,22 +103,27 @@ def _duration_label(hours_open: float) -> str:
     return " ".join(parts)
 
 
+def _display_text(t: dict) -> str:
+    """summary (cleaned up by the classifier) if we have one, else the raw message."""
+    return t.get("summary") or t["message"]
+
+
 def open_tickets_digest(tickets: list[dict]) -> str:
-    """tickets: list of dicts with id, reporter, department, message, hours_open."""
+    """tickets: list of dicts with id, reporter, department, message, summary, hours_open."""
     if not tickets:
         return "ไม่มีงานค้างอยู่ตอนนี้ครับ"
     lines = [f"📋 มีงานค้างอยู่ {len(tickets)} รายการ:"]
     for t in tickets:
         lines.append(
             f"{t['id']}. [{_reporter_label(t['reporter'])}/{t['department']}] "
-            f"{_snippet(t['message'])} (เปิดมา {_duration_label(t['hours_open'])})"
+            f"{_snippet(_display_text(t))} (เปิดมา {_duration_label(t['hours_open'])})"
         )
     return "\n".join(lines)
 
 
 def due_today_digest(tickets: list[dict]) -> str:
-    """tickets: list of dicts with id, reporter, department, message."""
+    """tickets: list of dicts with id, reporter, department, message, summary."""
     lines = [f"📅 งานที่ครบกำหนดวันนี้ {len(tickets)} รายการ:"]
     for t in tickets:
-        lines.append(f"#{t['id']} [{_reporter_label(t['reporter'])}/{t['department']}] {_snippet(t['message'])}")
+        lines.append(f"#{t['id']} [{_reporter_label(t['reporter'])}/{t['department']}] {_snippet(_display_text(t))}")
     return "\n".join(lines)

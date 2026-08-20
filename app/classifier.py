@@ -45,6 +45,7 @@ this shape:
 {{
   "intent": "new_ticket" | "due_date_reply" | "close_ticket" | "other",
   "department": "รถ" | "เครื่องจักร" | "พนักงาน" | "อื่นๆ",
+  "summary": "<cleaned-up short version of the issue, or null>",
   "due_date_days": <integer or null>,
   "due_date_calendar": "<YYYY-MM-DD or null>",
   "close_ticket_id": <integer or null>
@@ -99,6 +100,16 @@ appliances (not vehicles).
   - "พนักงาน": staff/personnel -- anything about an employee or a person's \
 behavior/HR-type issue.
   - "อื่นๆ": anything that doesn't clearly fit the three above.
+- "summary": only meaningful when intent is "new_ticket" (for other \
+intents, leave it null). A clean, short version of the actual issue/task, \
+with conversational framing stripped out -- drop lead-ins like "เตือนให้" \
+(remind [me] to), "ช่วย...ด้วย" (please help with...), "กรุณา"/"รบกวน" \
+(please), "แจ้งว่า" (reporting that) -- and drop the due date itself, \
+since that's already shown separately. Keep every concrete detail (what, \
+which item/number, location, etc.) exactly as given, just without the \
+filler. Example: "เตือนให้เปลี่ยนน้ำมันเครื่องเบอร์ 19 สระบุรี 17-10-69" \
+-> "เปลี่ยนน้ำมันเครื่องเบอร์ 19 สระบุรี". If there's nothing to strip, \
+just repeat the message as-is.
 
 Today's date is {today} ({tz}). Use it to resolve any relative dates.
 """
@@ -123,6 +134,7 @@ describes a distinct new problem instead.
 class Classification(TypedDict):
     intent: str
     department: str
+    summary: Optional[str]
     due_date_days: Optional[int]
     due_date_calendar: Optional[str]
     close_ticket_id: Optional[int]
@@ -132,6 +144,7 @@ def _default_classification() -> Classification:
     return {
         "intent": "new_ticket",
         "department": DEFAULT_DEPARTMENT,
+        "summary": None,
         "due_date_days": None,
         "due_date_calendar": None,
         "close_ticket_id": None,
@@ -190,9 +203,14 @@ def classify(message: str, awaiting_due_date: bool = False) -> Classification:
         if department not in KNOWN_DEPARTMENTS:
             department = DEFAULT_DEPARTMENT
 
+        summary = parsed.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            summary = None  # caller falls back to the raw message -- see webhook_handler.py
+
         result = {
             "intent": intent,
             "department": department,
+            "summary": summary,
             "due_date_days": parsed.get("due_date_days"),
             "due_date_calendar": parsed.get("due_date_calendar"),
             "close_ticket_id": parsed.get("close_ticket_id"),

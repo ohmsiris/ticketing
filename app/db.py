@@ -15,7 +15,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS tickets (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     reporter        TEXT NOT NULL CHECK (reporter IN ('ohm', 'mom')),
-    message         TEXT NOT NULL,
+    message         TEXT NOT NULL,     -- raw, as typed
+    summary         TEXT,              -- cleaned-up version for display (digests, confirmations); NULL falls back to message
     department      TEXT NOT NULL DEFAULT 'อื่นๆ', -- 'รถ' / 'เครื่องจักร' / 'พนักงาน' / 'อื่นๆ', validated in app/classifier.py
     status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     due_date        TEXT,              -- 'YYYY-MM-DD' or NULL
@@ -58,3 +59,5 @@ def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(tickets)").fetchall()}
     if "department" not in columns:
         conn.execute("ALTER TABLE tickets ADD COLUMN department TEXT NOT NULL DEFAULT 'อื่นๆ'")
+    if "summary" not in columns:
+        conn.execute("ALTER TABLE tickets ADD COLUMN summary TEXT")
