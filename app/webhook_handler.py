@@ -98,7 +98,7 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
         reply_message(reply_token, [strings.no_ticket_needs_due_date()])
         return
 
-    reply_message(reply_token, [strings.due_date_set(due_date)])
+    reply_message(reply_token, [strings.due_date_set(ticket["id"], due_date)])
 
 
 def _handle_close_ticket(reporter: str, result: dict, reply_token: str) -> None:

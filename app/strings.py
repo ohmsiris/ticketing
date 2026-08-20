@@ -18,8 +18,8 @@ def ask_due_date() -> str:
     return "มีกำหนดวันไหมครับ? บอกเป็นจำนวนวัน หรือระบุวันที่ก็ได้"
 
 
-def due_date_set(due_date: str) -> str:
-    return f"ตั้งกำหนดวันแล้ว: {due_date}"
+def due_date_set(ticket_id: int, due_date: str) -> str:
+    return f"📅 ตั้งกำหนดวันแล้ว: #{ticket_id} → {due_date}"
 
 
 def no_ticket_needs_due_date() -> str:
