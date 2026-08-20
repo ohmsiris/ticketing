@@ -57,8 +57,25 @@ date, e.g. "อีก 3 วัน", "อีก2วัน" (same thing, no spaces
 "วันศุกร์หน้า", or an explicit date. If they gave a relative offset in \
 days, fill due_date_days with that integer and leave due_date_calendar \
 null. If they gave (or implied) a specific calendar date, resolve it to \
-YYYY-MM-DD using today's date below and fill due_date_calendar, leaving \
-due_date_days null.
+YYYY-MM-DD and fill due_date_calendar, leaving due_date_days null. \
+Calendar date resolution rules:
+  - Recognize Thai month names in any common form -- full, short, or \
+abbreviated with a period, all equivalent: มกราคม/มกรา/ม.ค., \
+กุมภาพันธ์/กุมภา/ก.พ., มีนาคม/มีนา/มี.ค., เมษายน/เมษา/เม.ย., \
+พฤษภาคม/พฤษภา/พ.ค., มิถุนายน/มิถุนา/มิ.ย., กรกฎาคม/กรกฎา/ก.ค., \
+สิงหาคม/สิงหา/ส.ค., กันยายน/กันยา/ก.ย., ตุลาคม/ตุลา/ต.ค., \
+พฤศจิกายน/พฤศจิกา/พ.ย., ธันวาคม/ธันวา/ธ.ค. -- as well as plain numeric \
+dates like "19/4" or "5/1" (day/month order, Thai convention).
+  - If a year is given as 2 digits, or as a 4-digit number 2400 or \
+higher, treat it as Buddhist Era (BE) and convert to Gregorian by \
+subtracting 543 (e.g. "70" or "2570" -> 2027; "69" or "2569" -> 2026). A \
+4-digit year below 2400 is already Gregorian -- use it as-is.
+  - If NO year is given at all, pick whichever occurrence is soonest but \
+not already past: use the current year if that day/month hasn't happened \
+yet this year relative to today (given below); if it has already passed \
+this year, use next year instead. Example: if today is 2026-12-21 and \
+they say "5/1", that resolves to 2027-01-05 (next year), not 2026-01-05 \
+(already passed).
 - "close_ticket": the message says an issue is fixed/done/resolved/closed, \
 e.g. "ปิดงานนี้", "เสร็จแล้ว", "closed", "done with #14". If a specific \
 ticket number is mentioned, put it (as an integer) in close_ticket_id, \

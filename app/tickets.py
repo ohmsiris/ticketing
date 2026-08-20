@@ -22,6 +22,17 @@ def today_bangkok_str() -> str:
     return datetime.now(BANGKOK).date().isoformat()
 
 
+def is_past_date(due_date: str) -> bool:
+    """
+    True if due_date ('YYYY-MM-DD') is strictly before today, Bangkok time.
+    A code-level guard, not just prompt instructions -- the classifier's own
+    year-inference (see app/classifier.py) should avoid this for dates given
+    without a year, but an explicit date with an old/typo'd year should
+    still be rejected rather than silently accepted.
+    """
+    return due_date < today_bangkok_str()
+
+
 def resolve_due_date(due_date_days: Optional[int], due_date_calendar: Optional[str]) -> Optional[str]:
     """Turn the classifier's due-date fields into a single 'YYYY-MM-DD' string."""
     if due_date_calendar:

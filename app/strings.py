@@ -18,8 +18,8 @@ def ask_due_date() -> str:
     return "มีกำหนดวันไหมครับ? บอกเป็นจำนวนวัน หรือระบุวันที่ก็ได้"
 
 
-def due_date_set(ticket_id: int, due_date: str) -> str:
-    return f"📅 ตั้งกำหนดวันแล้ว: #{ticket_id} → {due_date}"
+def due_date_set(ticket_id: int, message: str, due_date: str) -> str:
+    return f"✅ บันทึกแล้ว (#{ticket_id})\n{_snippet(message)}\n📅 กำหนด: {due_date}"
 
 
 def no_ticket_needs_due_date() -> str:
@@ -28,6 +28,10 @@ def no_ticket_needs_due_date() -> str:
 
 def due_date_unclear() -> str:
     return "ขอวันที่อีกครั้งได้ไหมครับ เช่น 'อีก 3 วัน' หรือ '25 ส.ค.'"
+
+
+def due_date_in_past(due_date: str) -> str:
+    return f"วันที่ {due_date} ผ่านไปแล้วครับ ขอวันที่ในอนาคตได้ไหมครับ"
 
 
 # --- Closing tickets ---

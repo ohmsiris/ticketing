@@ -93,12 +93,16 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
         reply_message(reply_token, [strings.due_date_unclear()])
         return
 
+    if tickets.is_past_date(due_date):
+        reply_message(reply_token, [strings.due_date_in_past(due_date)])
+        return
+
     ticket = tickets.set_due_date(reporter, due_date)
     if ticket is None:
         reply_message(reply_token, [strings.no_ticket_needs_due_date()])
         return
 
-    reply_message(reply_token, [strings.due_date_set(ticket["id"], due_date)])
+    reply_message(reply_token, [strings.due_date_set(ticket["id"], ticket["message"], due_date)])
 
 
 def _handle_close_ticket(reporter: str, result: dict, reply_token: str) -> None:
