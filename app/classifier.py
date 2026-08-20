@@ -40,12 +40,12 @@ Read the user's latest message and decide what they mean. Respond with ONLY \
 a single JSON object, no markdown fences, no explanation, matching exactly \
 this shape:
 
-{
+{{
   "intent": "new_ticket" | "due_date_reply" | "close_ticket" | "other",
   "due_date_days": <integer or null>,
   "due_date_calendar": "<YYYY-MM-DD or null>",
   "close_ticket_id": <integer or null>
-}
+}}
 
 Rules:
 - "new_ticket": the message describes a new problem, issue, or task to track.
