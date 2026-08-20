@@ -10,8 +10,8 @@ behavior code.
 # --- Ticket capture ---
 
 
-def new_ticket_confirmation(ticket_id: int) -> str:
-    return f"✅ บันทึกแล้ว (#{ticket_id})"
+def new_ticket_confirmation(ticket_id: int, department: str) -> str:
+    return f"✅ บันทึกแล้ว (#{ticket_id}) แผนก: {department}"
 
 
 def ask_due_date() -> str:
@@ -94,21 +94,21 @@ def _duration_label(hours_open: float) -> str:
 
 
 def open_tickets_digest(tickets: list[dict]) -> str:
-    """tickets: list of dicts with id, reporter, message, hours_open."""
+    """tickets: list of dicts with id, reporter, department, message, hours_open."""
     if not tickets:
         return "ไม่มีงานค้างอยู่ตอนนี้ครับ"
     lines = [f"📋 มีงานค้างอยู่ {len(tickets)} รายการ:"]
     for t in tickets:
         lines.append(
-            f"{t['id']}. [{_reporter_label(t['reporter'])}] "
+            f"{t['id']}. [{_reporter_label(t['reporter'])}/{t['department']}] "
             f"{_snippet(t['message'])} (เปิดมา {_duration_label(t['hours_open'])})"
         )
     return "\n".join(lines)
 
 
 def due_today_digest(tickets: list[dict]) -> str:
-    """tickets: list of dicts with id, reporter, message."""
+    """tickets: list of dicts with id, reporter, department, message."""
     lines = [f"📅 งานที่ครบกำหนดวันนี้ {len(tickets)} รายการ:"]
     for t in tickets:
-        lines.append(f"#{t['id']} [{_reporter_label(t['reporter'])}] {_snippet(t['message'])}")
+        lines.append(f"#{t['id']} [{_reporter_label(t['reporter'])}/{t['department']}] {_snippet(t['message'])}")
     return "\n".join(lines)

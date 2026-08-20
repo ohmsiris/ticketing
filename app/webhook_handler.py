@@ -55,11 +55,15 @@ def handle_message_event(event: dict) -> None:
         reply_message(reply_token, [strings.open_tickets_digest(open_tickets)])
         return
 
-    result = classify(text)
+    # Hint the classifier when this sender has a ticket still waiting on a
+    # due date, so a short reply like "อีก2วัน" gets read as an answer to
+    # that instead of guessed cold as a new, unrelated ticket.
+    awaiting_due_date = tickets.has_pending_due_date_ticket(reporter)
+    result = classify(text, awaiting_due_date=awaiting_due_date)
     intent = result["intent"]
 
     if intent == "new_ticket":
-        _handle_new_ticket(reporter, text, reply_token)
+        _handle_new_ticket(reporter, text, result["department"], reply_token)
     elif intent == "due_date_reply":
         _handle_due_date_reply(reporter, result, reply_token)
     elif intent == "close_ticket":
@@ -68,14 +72,14 @@ def handle_message_event(event: dict) -> None:
         # classify() already normalizes unknown/"other" intents to
         # new_ticket, so this branch should be unreachable -- kept as a
         # safety net in case that contract ever changes.
-        _handle_new_ticket(reporter, text, reply_token)
+        _handle_new_ticket(reporter, text, result["department"], reply_token)
 
 
-def _handle_new_ticket(reporter: str, text: str, reply_token: str) -> None:
-    ticket_id = tickets.create_ticket(reporter, text)
+def _handle_new_ticket(reporter: str, text: str, department: str, reply_token: str) -> None:
+    ticket_id = tickets.create_ticket(reporter, text, department)
     ticket_count = tickets.increment_ticket_count(reporter)
 
-    confirmation = strings.new_ticket_confirmation(ticket_id)
+    confirmation = strings.new_ticket_confirmation(ticket_id, department)
     if reporter == "mom" and ticket_count <= ONBOARDING_TICKET_THRESHOLD:
         tip = strings.onboarding_first_ticket() if ticket_count == 1 else strings.onboarding_reminder_tip()
         confirmation = f"{confirmation}\n{tip}"

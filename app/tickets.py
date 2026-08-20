@@ -39,15 +39,32 @@ def _row_to_dict(row) -> dict:
 # --- Tickets ---
 
 
-def create_ticket(reporter: str, message: str) -> int:
+def create_ticket(reporter: str, message: str, department: str) -> int:
     conn = get_conn()
     try:
         cur = conn.execute(
-            "INSERT INTO tickets (reporter, message, status, created_at) VALUES (?, ?, 'open', ?)",
-            (reporter, message, _utc_now_iso()),
+            "INSERT INTO tickets (reporter, message, department, status, created_at) VALUES (?, ?, ?, 'open', ?)",
+            (reporter, message, department, _utc_now_iso()),
         )
         conn.commit()
         return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def has_pending_due_date_ticket(reporter: str) -> bool:
+    """
+    True if reporter has an open ticket that hasn't been given a due date
+    yet. Used to tell the classifier a short reply is more likely answering
+    that than describing something new -- see app/classifier.py.
+    """
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM tickets WHERE reporter = ? AND status = 'open' AND due_date IS NULL LIMIT 1",
+            (reporter,),
+        ).fetchone()
+        return row is not None
     finally:
         conn.close()
 

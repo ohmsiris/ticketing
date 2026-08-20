@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     reporter        TEXT NOT NULL CHECK (reporter IN ('ohm', 'mom')),
     message         TEXT NOT NULL,
+    department      TEXT NOT NULL DEFAULT 'อื่นๆ', -- 'รถ' / 'เครื่องจักร' / 'พนักงาน' / 'อื่นๆ', validated in app/classifier.py
     status          TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     due_date        TEXT,              -- 'YYYY-MM-DD' or NULL
     created_at      TEXT NOT NULL,     -- ISO 8601 UTC timestamp
@@ -38,10 +39,22 @@ def get_conn() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create tables if they don't exist yet. Safe to call on every startup."""
+    """
+    Create tables if they don't exist yet, and apply small in-place
+    migrations for columns added after the initial schema (CREATE TABLE IF
+    NOT EXISTS doesn't retrofit new columns onto an already-existing table).
+    Safe to call on every startup.
+    """
     conn = get_conn()
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(tickets)").fetchall()}
+    if "department" not in columns:
+        conn.execute("ALTER TABLE tickets ADD COLUMN department TEXT NOT NULL DEFAULT 'อื่นๆ'")
