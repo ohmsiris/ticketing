@@ -92,6 +92,8 @@ def handle_message_event(event: dict) -> None:
         _handle_due_date_reply(reporter, result, reply_token)
     elif intent == "close_ticket":
         _handle_close_ticket(reporter, result, open_tickets_for_reporter, reply_token)
+    elif intent == "cancel_ticket":
+        _handle_cancel_ticket(reporter, result, open_tickets_for_reporter, awaiting_due_date, reply_token)
     elif intent == "other":
         # Confidently not a report -- greeting, small talk, an unrelated
         # question. Reply conversationally instead of logging it as a
@@ -104,8 +106,8 @@ def handle_message_event(event: dict) -> None:
         reply_message(reply_token, [result.get("banter_reply") or strings.unclear_message()])
     else:
         # Should be unreachable -- classify() only ever returns one of the
-        # four branches above. Kept as a safety net in case that contract
-        # ever changes.
+        # branches above. Kept as a safety net in case that contract ever
+        # changes.
         _handle_new_ticket(reporter, text, result, reply_token)
 
 
@@ -205,7 +207,7 @@ def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter:
         return
 
     quick_reply = [
-        QuickReplyOption(label=_close_picker_label(t), text=f"ปิด #{t['id']}") for t in open_tickets_for_reporter
+        QuickReplyOption(label=_ticket_picker_label(t), text=f"ปิด #{t['id']}") for t in open_tickets_for_reporter
     ]
 
     # They described something specific ("ซ่อมมอเตอร์เสร็จแล้ว") but it
@@ -228,7 +230,66 @@ def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter:
     reply_message(reply_token, [strings.close_ticket_picker_prompt()], quick_reply=quick_reply)
 
 
-def _close_picker_label(ticket: dict) -> str:
+def _handle_cancel_ticket(
+    reporter: str,
+    result: dict,
+    open_tickets_for_reporter: list[dict],
+    awaiting_due_date: bool,
+    reply_token: str,
+) -> None:
+    """
+    Voids at most one ticket -- there is no bulk-cancel path anywhere in
+    this app, by design (see the cancel_ticket rule in classifier.py: a
+    bare cancel word with no number is never "cancel everything", even if
+    phrased that way). Shape mirrors _handle_close_ticket: explicit id
+    first, then (new) the awaiting-due-date shortcut, then an unambiguous
+    single-open-ticket case, then a tap-to-cancel picker when there's more
+    than one candidate and nothing to disambiguate by.
+    """
+    ticket_id = result.get("cancel_ticket_id")
+    if ticket_id is not None:
+        ticket = tickets.cancel_ticket_by_id(ticket_id, reporter)
+        if ticket is None:
+            reply_message(reply_token, [strings.ticket_not_found_or_closed(ticket_id)])
+            return
+        reply_message(reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])])
+        return
+
+    # No explicit number, but this arrived right after the bot asked for a
+    # due date -- unambiguously means "cancel the ticket you just asked me
+    # about", regardless of how many other tickets happen to be open, so no
+    # picker is needed here even if there's more than one open ticket.
+    if awaiting_due_date:
+        ticket = tickets.cancel_most_recent_missing_due_date_ticket(reporter)
+        if ticket is not None:
+            reply_message(
+                reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])]
+            )
+            return
+        # Nothing was actually missing a due date after all -- fall through
+        # to the generic path below rather than silently doing nothing.
+
+    if not open_tickets_for_reporter:
+        reply_message(reply_token, [strings.no_open_ticket_to_cancel()])
+        return
+
+    if len(open_tickets_for_reporter) == 1:
+        # Generic cancel phrase, nothing to disambiguate, only one
+        # candidate -- safe to assume that's the one.
+        ticket = tickets.cancel_ticket_by_id(open_tickets_for_reporter[0]["id"], reporter)
+        reply_message(reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])])
+        return
+
+    # More than one open ticket and nothing to tell them apart by -- ask via
+    # tappable buttons instead of guessing which one they meant. Still only
+    # ever cancels the single one they tap.
+    quick_reply = [
+        QuickReplyOption(label=_ticket_picker_label(t), text=f"ยกเลิก #{t['id']}") for t in open_tickets_for_reporter
+    ]
+    reply_message(reply_token, [strings.cancel_ticket_picker_prompt()], quick_reply=quick_reply)
+
+
+def _ticket_picker_label(ticket: dict) -> str:
     text = ticket.get("summary") or ticket["message"]
     label = f"#{ticket['id']} {text}"
     return label if len(label) <= 20 else label[:19] + "…"

@@ -23,7 +23,9 @@ def welcome_message() -> str:
         "4. ปิดงานที่เสร็จแล้ว — พิมพ์บอกว่าอะไรเสร็จ ไม่ต้องจำเลขงานเลย "
         "เช่น \"เปลี่ยนน้ำมันเสร็จแล้ว\" ระบบจะเดาให้เองว่าเป็นงานไหน "
         "ถ้าไม่ชัดเจนจะมีปุ่มให้กดเลือก ไม่ต้องพิมพ์เพิ่ม\n"
-        "5. ตอนนี้ยังไม่รองรับข้อความเสียง พิมพ์แทนได้เลยนะครับ"
+        "5. ยกเลิกงานที่พิมพ์ผิดหรือเปลี่ยนใจ — พิมพ์ \"ยกเลิก\" ได้เลย "
+        "(ยกเลิกได้ทีละงานเท่านั้นนะครับ ไม่ยกเลิกทั้งหมดพร้อมกัน)\n"
+        "6. ตอนนี้ยังไม่รองรับข้อความเสียง พิมพ์แทนได้เลยนะครับ"
     )
 
 
@@ -101,6 +103,24 @@ def close_ticket_picker_prompt() -> str:
 
 def close_ticket_no_match_prompt() -> str:
     return "ไม่พบงานที่ตรงกับที่พิมพ์มาครับ นี่คืองานที่เปิดอยู่ตอนนี้ เลือกได้เลยถ้าใช่งานใดงานหนึ่ง"
+
+
+# --- Cancelling tickets -- distinct from closing: closing means the work
+# got done, cancelling means the ticket itself is being withdrawn (mistake,
+# changed their mind, etc). Always exactly one ticket per message -- there
+# is no "cancel everything" anywhere in this app, by design. ---
+
+
+def ticket_cancelled(ticket_id: int, message: str) -> str:
+    return f"ยกเลิกงาน #{ticket_id} แล้ว\n{_snippet(message)}"
+
+
+def no_open_ticket_to_cancel() -> str:
+    return "ไม่มีงานที่เปิดอยู่ให้ยกเลิกครับ"
+
+
+def cancel_ticket_picker_prompt() -> str:
+    return "จะยกเลิกงานไหนครับ? เลือกจากด้านล่างได้เลย"
 
 
 # --- Unsupported input ---

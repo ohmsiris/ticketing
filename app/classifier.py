@@ -29,7 +29,7 @@ def _client_lazy() -> Anthropic:
 
 MODEL = "claude-sonnet-5"
 
-KNOWN_INTENTS = {"new_ticket", "due_date_reply", "close_ticket", "other"}
+KNOWN_INTENTS = {"new_ticket", "due_date_reply", "close_ticket", "cancel_ticket", "other"}
 KNOWN_DEPARTMENTS = {"รถ", "เครื่องจักร", "พนักงาน", "อื่นๆ"}
 DEFAULT_DEPARTMENT = "อื่นๆ"
 
@@ -43,7 +43,7 @@ a single JSON object, no markdown fences, no explanation, matching exactly \
 this shape:
 
 {{
-  "intent": "new_ticket" | "due_date_reply" | "close_ticket" | "other",
+  "intent": "new_ticket" | "due_date_reply" | "close_ticket" | "cancel_ticket" | "other",
   "department": "รถ" | "เครื่องจักร" | "พนักงาน" | "อื่นๆ",
   "summary": "<cleaned-up short version of the issue, or null>",
   "due_date_days": <integer or null>,
@@ -51,6 +51,7 @@ this shape:
   "remind_days_before": <integer or null>,
   "close_ticket_id": <integer or null>,
   "close_specific_no_match": <true or false>,
+  "cancel_ticket_id": <integer or null>,
   "banter_reply": "<short Thai reply, or null>"
 }}
 
@@ -104,7 +105,9 @@ e.g. "ปิดงานนี้", "เสร็จแล้ว", "closed", "do
 past-tense completion report like "ถ่ายน้ำมันเครื่องเบอร์ 1 แล้ว" / \
 "เปลี่ยนลูกปืนเสร็จเรียบร้อยแล้ว" (no explicit "close" word needed -- \
 "แล้ว"/"เสร็จ(เรียบร้อย)แล้ว" on a task description is itself a completion \
-report). If a specific ticket number is mentioned, put it (as an integer) \
+report). This means the work actually got done -- if instead they're \
+withdrawing/undoing the ticket itself, that's cancel_ticket below, not \
+this. If a specific ticket number is mentioned, put it (as an integer) \
 in close_ticket_id. If no number is given but the message clearly \
 describes the content of exactly one ticket from this person's \
 open-tickets list (given in context below, if any), put THAT ticket's id \
@@ -118,6 +121,22 @@ guess that unrelated ticket is the one they mean.
   - false if the message was generic with nothing to match against at all \
 (plain "ปิดงาน"/"เสร็จแล้ว") -- in that case, if only one ticket is open, \
 it's fine to assume that's the one.
+- "cancel_ticket": the message says to cancel, undo, scrap, or void a \
+ticket -- NOT the same as close_ticket. close_ticket means the described \
+work actually happened; cancel_ticket means the ticket itself shouldn't \
+be tracked at all -- it was a mistake, a duplicate, plans changed, or \
+they're backing out of something they just reported. Trigger words/ \
+phrases: "ยกเลิก", "ไม่เอาแล้ว", "ไม่ใช่", "พิมพ์ผิด", "งดไว้ก่อน", or \
+similar -- with no completion language ("เสร็จแล้ว" etc). If a specific \
+ticket number is mentioned, put it (as an integer) in cancel_ticket_id, \
+otherwise leave it null -- the app resolves which ticket that refers to \
+from context (see close_ticket's number/no-number handling above, same \
+idea). A bare cancel word with no number NEVER means "cancel everything" \
+-- there is no concept of cancelling more than one ticket at once in this \
+system, so don't try to enumerate multiple ids even if the message says \
+something like "ยกเลิกทั้งหมด" (cancel everything) -- just leave \
+cancel_ticket_id null as usual and let the app figure out the one ticket \
+that's actually relevant.
 - "other": anything that doesn't clearly fit the above (small talk, \
 unclear, questions unrelated to tickets).
 - "banter_reply": ONLY when intent is "other" (null for every other \
@@ -167,8 +186,12 @@ and the bot's last message to them was asking for one. If this message \
 could plausibly be answering that -- a timeframe, a date, "ไม่มี", \
 "ไม่แน่ใจ", even a bare number -- classify it as "due_date_reply" rather \
 than "new_ticket", even if the phrasing is terse or has no spaces (e.g. \
-"อีก2วัน" means "อีก 2 วัน"). Only treat it as a new_ticket if it clearly \
-describes a distinct new problem instead.
+"อีก2วัน" means "อีก 2 วัน"). If instead they're backing out of the \
+ticket itself rather than answering about a date -- "ยกเลิก", "ไม่เอาแล้ว", \
+"ไม่ใช่", "พิมพ์ผิด" and similar, with nothing that reads as a date -- \
+classify it as "cancel_ticket" with cancel_ticket_id left null; the app \
+already knows which ticket that means in this situation. Only treat it as \
+a new_ticket if it clearly describes a distinct new problem instead.
 """
 
 
@@ -195,6 +218,7 @@ class Classification(TypedDict):
     remind_days_before: Optional[int]
     close_ticket_id: Optional[int]
     close_specific_no_match: bool
+    cancel_ticket_id: Optional[int]
     banter_reply: Optional[str]
 
 
@@ -208,6 +232,7 @@ def _default_classification() -> Classification:
         "remind_days_before": None,
         "close_ticket_id": None,
         "close_specific_no_match": False,
+        "cancel_ticket_id": None,
         "banter_reply": None,
     }
 
@@ -296,6 +321,7 @@ def classify(
             "remind_days_before": remind_days_before,
             "close_ticket_id": parsed.get("close_ticket_id"),
             "close_specific_no_match": bool(parsed.get("close_specific_no_match")),
+            "cancel_ticket_id": parsed.get("cancel_ticket_id"),
             "banter_reply": banter_reply,
         }
     except Exception:

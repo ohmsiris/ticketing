@@ -21,18 +21,30 @@ def _bangkok_str(iso_utc: str) -> str:
     return datetime.fromisoformat(iso_utc).astimezone(BANGKOK).strftime("%Y-%m-%d %H:%M")
 
 
+def _status_label(t: dict) -> str:
+    # cancelled_at is set on a voided ticket instead of a genuinely closed
+    # one (status is 'closed' either way -- see tickets.cancel_ticket_by_id
+    # for why); label it distinctly so "cancelled" and "actually done"
+    # don't look the same on the dashboard/CSV export.
+    if t["status"] == "closed" and t.get("cancelled_at"):
+        return "ยกเลิก"
+    return STATUS_LABEL.get(t["status"], t["status"])
+
+
 def _row_html(t: dict) -> str:
     display_text = html.escape(t.get("summary") or t["message"])
     status = t["status"]
-    status_label = html.escape(STATUS_LABEL.get(status, status))
+    cancelled = status == "closed" and bool(t.get("cancelled_at"))
+    status_label = html.escape(_status_label(t))
     due = html.escape(t["due_date"]) if t["due_date"] else "—"
     row_class = "closed" if status == "closed" else ""
+    badge_class = "cancelled" if cancelled else status
     return f"""      <tr class="{row_class}">
         <td>#{t['id']}</td>
         <td>{html.escape(t['reporter'])}</td>
         <td>{html.escape(t['department'])}</td>
         <td>{display_text}</td>
-        <td><span class="badge badge-{status}">{status_label}</span></td>
+        <td><span class="badge badge-{badge_class}">{status_label}</span></td>
         <td>{due}</td>
         <td>{_bangkok_str(t['created_at'])}</td>
       </tr>"""
@@ -59,6 +71,7 @@ def render_tickets_page(tickets: list[dict]) -> str:
   .badge {{ padding: 2px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; }}
   .badge-open {{ background: #14331f; color: #4ade80; }}
   .badge-closed {{ background: #2a2d34; color: #9aa0a6; }}
+  .badge-cancelled {{ background: #3a2a12; color: #eab676; }}
 </style>
 </head>
 <body>
@@ -94,7 +107,7 @@ def render_tickets_csv(tickets: list[dict]) -> str:
                 t["reporter"],
                 t["department"],
                 t.get("summary") or t["message"],
-                STATUS_LABEL.get(t["status"], t["status"]),
+                _status_label(t),
                 t["due_date"] or "",
                 _bangkok_str(t["created_at"]),
             ]

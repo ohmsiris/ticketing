@@ -69,8 +69,9 @@ def get_open_tickets_for_reporter(reporter: str) -> list[dict]:
     classifier whether this sender has a ticket still missing a due date
     (see CONTEXT_AWAITING_DUE_DATE in app/classifier.py), (b) give it
     content to match a close_ticket message against by meaning, and (c)
-    decide whether a close request needs a tap-to-close picker (see
-    _handle_close_ticket in app/webhook_handler.py).
+    decide whether a close or cancel request needs a tap-to-pick picker
+    (see _handle_close_ticket / _handle_cancel_ticket in
+    app/webhook_handler.py).
     """
     conn = get_conn()
     try:
@@ -152,6 +153,64 @@ def close_ticket_by_id(ticket_id: int, reporter: str) -> Optional[dict]:
         if row is None:
             return None
         conn.execute("UPDATE tickets SET status = 'closed' WHERE id = ?", (ticket_id,))
+        conn.commit()
+        return _row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def cancel_ticket_by_id(ticket_id: int, reporter: str) -> Optional[dict]:
+    """
+    Voids a ticket -- distinct from closing: close_ticket_by_id means the
+    work described actually got done, this means the ticket shouldn't be
+    tracked at all (a mistake, changed plans, they backed out of what they
+    just reported). Stored as status='closed' plus cancelled_at set, so it
+    drops out of every open-ticket query exactly like a real close does,
+    but the dashboard/digests can still tell the two apart and label it
+    accordingly (see app/dashboard.py). Reporter-scoped for the same reason
+    close_ticket_by_id is -- an explicitly typed number shouldn't be able
+    to touch the other person's ticket.
+    """
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM tickets WHERE id = ? AND reporter = ? AND status = 'open'", (ticket_id, reporter)
+        ).fetchone()
+        if row is None:
+            return None
+        now = _utc_now_iso()
+        conn.execute("UPDATE tickets SET status = 'closed', cancelled_at = ? WHERE id = ?", (now, ticket_id))
+        conn.commit()
+        return _row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def cancel_most_recent_missing_due_date_ticket(reporter: str) -> Optional[dict]:
+    """
+    Same targeting as set_due_date() -- the reporter's most recently
+    created open ticket that's still missing a due date -- but cancels it
+    instead of setting one. Used when someone answers the "when's this
+    due?" prompt with a cancellation rather than a date (see
+    CONTEXT_AWAITING_DUE_DATE in app/classifier.py): unambiguous by
+    construction, so no picker is needed the way a generic cancel request
+    might (see _handle_cancel_ticket in app/webhook_handler.py).
+    """
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT * FROM tickets
+            WHERE reporter = ? AND status = 'open' AND due_date IS NULL
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (reporter,),
+        ).fetchone()
+        if row is None:
+            return None
+        now = _utc_now_iso()
+        conn.execute("UPDATE tickets SET status = 'closed', cancelled_at = ? WHERE id = ?", (now, row["id"]))
         conn.commit()
         return _row_to_dict(row)
     finally:

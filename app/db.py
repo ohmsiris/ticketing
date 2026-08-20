@@ -24,7 +24,12 @@ CREATE TABLE IF NOT EXISTS tickets (
     reminded_at     TEXT,              -- ISO 8601 UTC timestamp, last open-ticket reminder
     due_reminded_at TEXT,              -- 'YYYY-MM-DD', date the due-today digest last included this ticket
     remind_days_before  INTEGER,       -- extra heads-up N days before due_date, or NULL for none
-    due_soon_reminded_at TEXT          -- 'YYYY-MM-DD', date the heads-up digest last included this ticket
+    due_soon_reminded_at TEXT,         -- 'YYYY-MM-DD', date the heads-up digest last included this ticket
+    cancelled_at    TEXT               -- ISO 8601 UTC timestamp if voided via cancel_ticket rather than genuinely
+                                        -- closed; status is still 'closed' either way (see tickets.cancel_ticket_by_id)
+                                        -- -- deliberately not a third status value, since SQLite can't add one to an
+                                        -- existing CHECK constraint without rebuilding the whole table, which isn't
+                                        -- worth the risk on a live DB for what's purely a display distinction
 );
 
 CREATE TABLE IF NOT EXISTS user_state (
@@ -67,3 +72,5 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tickets ADD COLUMN remind_days_before INTEGER")
     if "due_soon_reminded_at" not in columns:
         conn.execute("ALTER TABLE tickets ADD COLUMN due_soon_reminded_at TEXT")
+    if "cancelled_at" not in columns:
+        conn.execute("ALTER TABLE tickets ADD COLUMN cancelled_at TEXT")
