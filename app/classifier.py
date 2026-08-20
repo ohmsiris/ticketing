@@ -147,7 +147,15 @@ def classify(message: str, awaiting_due_date: bool = False) -> Classification:
             system=system,
             messages=[{"role": "user", "content": message}],
         )
-        raw_text = response.content[0].text
+        # claude-sonnet-5 can return a leading "thinking" content block
+        # before the actual answer, so find the text block by type rather
+        # than assuming content[0] is it (that assumption silently broke
+        # every single classification -- always caught by the except below
+        # and defaulted -- until this was caught via live testing).
+        text_block = next((b for b in response.content if b.type == "text"), None)
+        if text_block is None:
+            raise ValueError("no text block in model response")
+        raw_text = text_block.text
         parsed = _extract_json(raw_text)
 
         intent = parsed.get("intent")
