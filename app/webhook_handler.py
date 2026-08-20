@@ -98,8 +98,10 @@ def handle_message_event(event: dict) -> None:
         # ticket (see classifier.py for why this is no longer forced into
         # new_ticket). classify() still defaults to new_ticket on anything
         # it can't confidently read as "other" either, so a real report
-        # never gets silently dropped here.
-        reply_message(reply_token, [strings.unclear_message()])
+        # never gets silently dropped here. banter_reply is the
+        # classifier's own short, warm reply to what they actually said;
+        # falls back to a static line if it's missing for any reason.
+        reply_message(reply_token, [result.get("banter_reply") or strings.unclear_message()])
     else:
         # Should be unreachable -- classify() only ever returns one of the
         # four branches above. Kept as a safety net in case that contract

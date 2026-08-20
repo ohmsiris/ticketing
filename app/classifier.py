@@ -50,7 +50,8 @@ this shape:
   "due_date_calendar": "<YYYY-MM-DD or null>",
   "remind_days_before": <integer or null>,
   "close_ticket_id": <integer or null>,
-  "close_specific_no_match": <true or false>
+  "close_specific_no_match": <true or false>,
+  "banter_reply": "<short Thai reply, or null>"
 }}
 
 Rules:
@@ -119,6 +120,17 @@ guess that unrelated ticket is the one they mean.
 it's fine to assume that's the one.
 - "other": anything that doesn't clearly fit the above (small talk, \
 unclear, questions unrelated to tickets).
+- "banter_reply": ONLY when intent is "other" (null for every other \
+intent). A short reply in Thai actually responding to what they said -- a \
+greeting gets a greeting back, "ขอบคุณ" gets a warm "ยินดีครับ", a random \
+comment gets a light, natural acknowledgment. Tone: warm and a little \
+lighthearted, like a friendly coworker, NOT a jokey/sarcastic comedy bot -- \
+this may be read by someone unfamiliar with chatbots, including an older \
+family member. One short sentence, occasionally two. After responding to \
+what they said, end with a brief, natural nudge back to what you're for, \
+e.g. "มีอะไรให้ช่วยแจ้งได้เลยนะครับ" -- vary the phrasing, don't repeat the \
+exact same nudge every time. Never sarcastic, never a joke at their \
+expense, never more than ~2 short sentences total.
 - "department": which category the underlying issue belongs to -- only \
 meaningful when intent is "new_ticket" (for other intents, just give your \
 best guess or "อื่นๆ", it won't be used):
@@ -183,6 +195,7 @@ class Classification(TypedDict):
     remind_days_before: Optional[int]
     close_ticket_id: Optional[int]
     close_specific_no_match: bool
+    banter_reply: Optional[str]
 
 
 def _default_classification() -> Classification:
@@ -195,6 +208,7 @@ def _default_classification() -> Classification:
         "remind_days_before": None,
         "close_ticket_id": None,
         "close_specific_no_match": False,
+        "banter_reply": None,
     }
 
 
@@ -267,6 +281,12 @@ def classify(
         if not isinstance(remind_days_before, int) or isinstance(remind_days_before, bool) or remind_days_before <= 0:
             remind_days_before = None  # 0/negative/non-numeric doesn't mean anything as "days before"
 
+        banter_reply = parsed.get("banter_reply")
+        if intent != "other" or not isinstance(banter_reply, str) or not banter_reply.strip():
+            # only meaningful for "other" -- webhook_handler.py falls back to
+            # a plain static reply if this is missing/empty
+            banter_reply = None
+
         result = {
             "intent": intent,
             "department": department,
@@ -276,6 +296,7 @@ def classify(
             "remind_days_before": remind_days_before,
             "close_ticket_id": parsed.get("close_ticket_id"),
             "close_specific_no_match": bool(parsed.get("close_specific_no_match")),
+            "banter_reply": banter_reply,
         }
     except Exception:
         logger.exception("classification failed, defaulting to new_ticket")
