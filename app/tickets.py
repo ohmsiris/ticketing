@@ -142,6 +142,28 @@ def close_most_recent_open(reporter: str) -> Optional[dict]:
         conn.close()
 
 
+def get_all_tickets() -> list[dict]:
+    """
+    Every ticket, open and closed, most-relevant first: open before closed,
+    then soonest due date, then newest first. Powers the /tickets dashboard.
+    """
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM tickets
+            ORDER BY
+                CASE status WHEN 'open' THEN 0 ELSE 1 END,
+                CASE WHEN due_date IS NULL THEN 1 ELSE 0 END,
+                due_date ASC,
+                created_at DESC
+            """
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def get_open_tickets(min_age_hours: float = 0) -> list[dict]:
     """
     Open tickets, oldest first, each annotated with hours_open. Used both by

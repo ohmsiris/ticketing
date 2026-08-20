@@ -12,8 +12,11 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
+from app import tickets
+from app.config import settings
+from app.dashboard import render_tickets_page
 from app.db import init_db
 from app.jobs import start_scheduler
 from app.line_client import verify_signature
@@ -37,6 +40,22 @@ app = FastAPI(title="Ticketing LINE Bot", lifespan=lifespan)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/tickets", response_class=HTMLResponse)
+def tickets_dashboard(token: str = ""):
+    # Simple shared-token gate, not real auth -- this is a 2-person pilot
+    # with no login system. Set DASHBOARD_TOKEN and share the link with the
+    # token as a query param, e.g. https://.../tickets?token=xxxx. If it's
+    # not set, the page is left open (with a loud log warning) so this
+    # doesn't block first deploy -- set it before sharing the link around.
+    if settings.dashboard_token:
+        if token != settings.dashboard_token:
+            return HTMLResponse("Forbidden -- missing or incorrect ?token=", status_code=403)
+    else:
+        logger.warning("DASHBOARD_TOKEN not set -- /tickets is publicly viewable with no token required")
+
+    return render_tickets_page(tickets.get_all_tickets())
 
 
 @app.post("/webhook")

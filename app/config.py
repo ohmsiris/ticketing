@@ -28,6 +28,7 @@ class Settings:
     anthropic_api_key: str
     db_path: str
     port: int
+    dashboard_token: str
 
 
 def _load() -> Settings:
@@ -39,6 +40,7 @@ def _load() -> Settings:
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         db_path=os.environ.get("DB_PATH", "data/tickets.db"),
         port=int(os.environ.get("PORT", "8000")),
+        dashboard_token=os.environ.get("DASHBOARD_TOKEN", ""),
     )
 
 

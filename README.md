@@ -131,7 +131,7 @@ per step 2 above, and you're running.
 
 ```
 app/
-  main.py             FastAPI app: /webhook route, /health, startup wiring
+  main.py             FastAPI app: /webhook, /health, /tickets, startup wiring
   config.py            env var loading
   db.py                 SQLite schema + connection helper
   tickets.py             all ticket / user_state queries
@@ -140,9 +140,20 @@ app/
   webhook_handler.py         routes a classified message to an action
   jobs.py                     the two scheduled digest jobs
   strings.py                   every Thai string the bot sends
+  dashboard.py                  renders the /tickets HTML table
 data/
   tickets.db                    created automatically on first run
 ```
+
+## Viewing all tickets
+
+`GET /tickets` on your deployed URL shows every ticket (open + closed) in
+one table: id, reporter, department, summary, status, due date, filed time.
+It's plain server-rendered HTML, no login system -- protected only by a
+shared token via `DASHBOARD_TOKEN` (see `.env.example`). Visit it as
+`https://your-app.up.railway.app/tickets?token=<DASHBOARD_TOKEN>`. If
+`DASHBOARD_TOKEN` is left blank the page is open to anyone with the URL,
+which is fine for local poking but not recommended once deployed.
 
 ## Notes / known limits (v0, by design)
 
