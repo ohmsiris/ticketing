@@ -85,9 +85,16 @@ this year, use next year instead. Example: if today is 2026-12-21 and \
 they say "5/1", that resolves to 2027-01-05 (next year), not 2026-01-05 \
 (already passed).
 - "close_ticket": the message says an issue is fixed/done/resolved/closed, \
-e.g. "ปิดงานนี้", "เสร็จแล้ว", "closed", "done with #14". If a specific \
-ticket number is mentioned, put it (as an integer) in close_ticket_id, \
-otherwise leave it null (meaning "the last thing I reported").
+e.g. "ปิดงานนี้", "เสร็จแล้ว", "closed", "done with #14", "ปิด #3". If a \
+specific ticket number is mentioned, put it (as an integer) in \
+close_ticket_id. If no number is given but the message clearly describes \
+the content of exactly one ticket from this person's open-tickets list \
+(given in context below, if any), put THAT ticket's id in close_ticket_id \
+instead -- match by meaning, not exact wording. If it's not possible to \
+tell which one they mean (a generic message like "ปิดงาน"/"เสร็จแล้ว" with \
+nothing to match against, and more than one ticket is open), leave \
+close_ticket_id null -- the app handles picking from the list itself in \
+that case.
 - "other": anything that doesn't clearly fit the above (small talk, \
 unclear, questions unrelated to tickets).
 - "department": which category the underlying issue belongs to -- only \
@@ -131,6 +138,20 @@ describes a distinct new problem instead.
 """
 
 
+def _open_tickets_context(open_tickets: Optional[list]) -> str:
+    """
+    Builds the context block listing a person's currently open tickets, so
+    close_ticket can be matched by content ("ปิดงานเปลี่ยนน้ำมัน") instead of
+    requiring an exact id every time -- see the "close_ticket" rule above.
+    """
+    if not open_tickets:
+        return "\n\nThis person has no open tickets right now."
+    lines = ["\n\nThis person's open tickets (id: description):"]
+    for t in open_tickets:
+        lines.append(f"#{t['id']}: {t.get('summary') or t['message']}")
+    return "\n".join(lines)
+
+
 class Classification(TypedDict):
     intent: str
     department: str
@@ -160,7 +181,11 @@ def _extract_json(text: str) -> dict:
     return json.loads(match.group(0))
 
 
-def classify(message: str, awaiting_due_date: bool = False) -> Classification:
+def classify(
+    message: str,
+    awaiting_due_date: bool = False,
+    open_tickets: Optional[list] = None,
+) -> Classification:
     """
     Classifies a single incoming text message. Never raises -- on any error,
     or if the model returns an intent we don't recognize, this falls back to
@@ -169,11 +194,16 @@ def classify(message: str, awaiting_due_date: bool = False) -> Classification:
     awaiting_due_date: pass True when the sender has an open ticket still
     missing a due date, so the classifier knows a short reply is more likely
     answering that than describing something new (see webhook_handler.py).
+
+    open_tickets: this sender's currently open tickets (list of dicts with
+    at least id/message/summary), so a close_ticket message can be matched
+    to one by content instead of requiring an exact ticket number.
     """
     today = datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
     system = SYSTEM_PROMPT.format(today=today, tz=TIMEZONE)
     if awaiting_due_date:
         system += CONTEXT_AWAITING_DUE_DATE
+    system += _open_tickets_context(open_tickets)
 
     result = _default_classification()
     raw_text = None
@@ -230,6 +260,7 @@ def classify(message: str, awaiting_due_date: bool = False) -> Classification:
             {
                 "raw_message": message,
                 "awaiting_due_date": awaiting_due_date,
+                "open_ticket_ids": [t["id"] for t in (open_tickets or [])],
                 "model_output": raw_text,
                 "classification": routed,
             },

@@ -9,7 +9,7 @@ import logging
 from app import strings, tickets
 from app.classifier import classify
 from app.config import settings
-from app.line_client import reply_message
+from app.line_client import QuickReplyOption, reply_message
 
 logger = logging.getLogger("ticketing.webhook")
 
@@ -55,11 +55,14 @@ def handle_message_event(event: dict) -> None:
         reply_message(reply_token, [strings.open_tickets_digest(open_tickets)])
         return
 
-    # Hint the classifier when this sender has a ticket still waiting on a
-    # due date, so a short reply like "อีก2วัน" gets read as an answer to
-    # that instead of guessed cold as a new, unrelated ticket.
-    awaiting_due_date = tickets.has_pending_due_date_ticket(reporter)
-    result = classify(text, awaiting_due_date=awaiting_due_date)
+    # Fetched once and reused for two things: (a) tells the classifier when
+    # this sender has a ticket still waiting on a due date, so a short reply
+    # like "อีก2วัน" reads as an answer instead of a new, unrelated ticket,
+    # and (b) gives it content to match a close_ticket message against, and
+    # backs the tap-to-close picker if that match is ambiguous.
+    open_tickets_for_reporter = tickets.get_open_tickets_for_reporter(reporter)
+    awaiting_due_date = any(t["due_date"] is None for t in open_tickets_for_reporter)
+    result = classify(text, awaiting_due_date=awaiting_due_date, open_tickets=open_tickets_for_reporter)
     intent = result["intent"]
 
     if intent == "new_ticket":
@@ -67,7 +70,7 @@ def handle_message_event(event: dict) -> None:
     elif intent == "due_date_reply":
         _handle_due_date_reply(reporter, result, reply_token)
     elif intent == "close_ticket":
-        _handle_close_ticket(reporter, result, reply_token)
+        _handle_close_ticket(reporter, result, open_tickets_for_reporter, reply_token)
     else:
         # classify() already normalizes unknown/"other" intents to
         # new_ticket, so this branch should be unreachable -- kept as a
@@ -125,18 +128,40 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
     reply_message(reply_token, [strings.due_date_set(ticket["id"], ticket["summary"] or ticket["message"], due_date)])
 
 
-def _handle_close_ticket(reporter: str, result: dict, reply_token: str) -> None:
+def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter: list[dict], reply_token: str) -> None:
+    # An id here can come from an explicit number in the message, or from
+    # the classifier content-matching it against open_tickets_for_reporter
+    # (e.g. "ปิดงานเปลี่ยนน้ำมัน") -- either way, close_ticket_by_id is
+    # reporter-scoped so this can't ever close the other person's ticket.
     ticket_id = result.get("close_ticket_id")
     if ticket_id is not None:
-        ticket = tickets.close_ticket_by_id(ticket_id)
+        ticket = tickets.close_ticket_by_id(ticket_id, reporter)
         if ticket is None:
             reply_message(reply_token, [strings.ticket_not_found_or_closed(ticket_id)])
             return
         reply_message(reply_token, [strings.ticket_closed(ticket["id"])])
         return
 
-    ticket = tickets.close_most_recent_open(reporter)
-    if ticket is None:
+    if not open_tickets_for_reporter:
         reply_message(reply_token, [strings.no_open_ticket_to_close()])
         return
-    reply_message(reply_token, [strings.ticket_closed(ticket["id"])])
+
+    if len(open_tickets_for_reporter) == 1:
+        # Only one candidate -- unambiguous even without a match, no need
+        # to make them pick.
+        ticket = tickets.close_ticket_by_id(open_tickets_for_reporter[0]["id"], reporter)
+        reply_message(reply_token, [strings.ticket_closed(ticket["id"])])
+        return
+
+    # More than one open ticket and nothing to tell them apart by -- ask via
+    # tappable buttons instead of guessing which one they meant.
+    quick_reply = [
+        QuickReplyOption(label=_close_picker_label(t), text=f"ปิด #{t['id']}") for t in open_tickets_for_reporter
+    ]
+    reply_message(reply_token, [strings.close_ticket_picker_prompt()], quick_reply=quick_reply)
+
+
+def _close_picker_label(ticket: dict) -> str:
+    text = ticket.get("summary") or ticket["message"]
+    label = f"#{ticket['id']} {text}"
+    return label if len(label) <= 20 else label[:19] + "…"

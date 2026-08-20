@@ -8,11 +8,13 @@ Docs:
 - https://developers.line.biz/en/reference/messaging-api/#verify-signature
 - https://developers.line.biz/en/reference/messaging-api/#send-reply-message
 - https://developers.line.biz/en/reference/messaging-api/#send-push-message
+- https://developers.line.biz/en/reference/messaging-api/#quick-reply
 """
 import base64
 import hashlib
 import hmac
 import logging
+from typing import NamedTuple, Optional
 
 import httpx
 
@@ -52,8 +54,28 @@ def _as_messages(texts: list[str]) -> list[dict]:
     return [{"type": "text", "text": t} for t in texts[:5]]
 
 
-def reply_message(reply_token: str, texts: list[str]) -> None:
-    payload = {"replyToken": reply_token, "messages": _as_messages(texts)}
+class QuickReplyOption(NamedTuple):
+    label: str  # shown on the tappable button, LINE caps this at 20 chars
+    text: str  # sent as a normal text message (as if typed) when tapped
+
+
+def reply_message(reply_token: str, texts: list[str], quick_reply: Optional[list[QuickReplyOption]] = None) -> None:
+    """
+    quick_reply: tappable buttons attached to the last bubble. Tapping one
+    just sends `text` as an ordinary message from the user -- it goes
+    through the normal webhook -> classify() flow like anything typed by
+    hand, so no separate postback handling is needed. Used for the
+    tap-to-close ticket picker (see webhook_handler.py).
+    """
+    messages = _as_messages(texts)
+    if quick_reply and messages:
+        messages[-1]["quickReply"] = {
+            "items": [
+                {"type": "action", "action": {"type": "message", "label": opt.label[:20], "text": opt.text}}
+                for opt in quick_reply[:13]  # LINE's own cap on quick reply items
+            ]
+        }
+    payload = {"replyToken": reply_token, "messages": messages}
     _post(REPLY_URL, payload)
 
 

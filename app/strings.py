@@ -55,6 +55,10 @@ def ticket_not_found_or_closed(ticket_id: int) -> str:
     return f"ไม่พบทิกเก็ต #{ticket_id} หรือถูกปิดไปแล้วครับ"
 
 
+def close_ticket_picker_prompt() -> str:
+    return "จะปิดงานไหนครับ? เลือกจากด้านล่างได้เลย"
+
+
 # --- Unsupported input ---
 
 

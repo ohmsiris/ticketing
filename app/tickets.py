@@ -63,19 +63,22 @@ def create_ticket(reporter: str, message: str, department: str, summary: Optiona
         conn.close()
 
 
-def has_pending_due_date_ticket(reporter: str) -> bool:
+def get_open_tickets_for_reporter(reporter: str) -> list[dict]:
     """
-    True if reporter has an open ticket that hasn't been given a due date
-    yet. Used to tell the classifier a short reply is more likely answering
-    that than describing something new -- see app/classifier.py.
+    One reporter's open tickets, oldest first. Used to: (a) tell the
+    classifier whether this sender has a ticket still missing a due date
+    (see CONTEXT_AWAITING_DUE_DATE in app/classifier.py), (b) give it
+    content to match a close_ticket message against by meaning, and (c)
+    decide whether a close request needs a tap-to-close picker (see
+    _handle_close_ticket in app/webhook_handler.py).
     """
     conn = get_conn()
     try:
-        row = conn.execute(
-            "SELECT 1 FROM tickets WHERE reporter = ? AND status = 'open' AND due_date IS NULL LIMIT 1",
+        rows = conn.execute(
+            "SELECT * FROM tickets WHERE reporter = ? AND status = 'open' ORDER BY created_at ASC",
             (reporter,),
-        ).fetchone()
-        return row is not None
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
     finally:
         conn.close()
 
@@ -106,36 +109,22 @@ def set_due_date(reporter: str, due_date: str) -> Optional[dict]:
         conn.close()
 
 
-def close_ticket_by_id(ticket_id: int) -> Optional[dict]:
+def close_ticket_by_id(ticket_id: int, reporter: str) -> Optional[dict]:
+    """
+    Scoped to reporter -- previously this closed any ticket id regardless of
+    who filed it, so one person naming a number could accidentally close
+    the other person's ticket. Content-matched/picker-selected ids (see
+    webhook_handler.py) always come from that reporter's own open tickets
+    already, but an explicitly typed number needs this guard too.
+    """
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM tickets WHERE id = ? AND status = 'open'", (ticket_id,)
+            "SELECT * FROM tickets WHERE id = ? AND reporter = ? AND status = 'open'", (ticket_id, reporter)
         ).fetchone()
         if row is None:
             return None
         conn.execute("UPDATE tickets SET status = 'closed' WHERE id = ?", (ticket_id,))
-        conn.commit()
-        return _row_to_dict(row)
-    finally:
-        conn.close()
-
-
-def close_most_recent_open(reporter: str) -> Optional[dict]:
-    conn = get_conn()
-    try:
-        row = conn.execute(
-            """
-            SELECT * FROM tickets
-            WHERE reporter = ? AND status = 'open'
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1
-            """,
-            (reporter,),
-        ).fetchone()
-        if row is None:
-            return None
-        conn.execute("UPDATE tickets SET status = 'closed' WHERE id = ?", (row["id"],))
         conn.commit()
         return _row_to_dict(row)
     finally:

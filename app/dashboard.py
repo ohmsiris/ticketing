@@ -1,9 +1,12 @@
 """
-Minimal read-only HTML view of every ticket: GET /tickets (see app/main.py
-for the route + token check). Hand-rolled with f-strings + html.escape
-rather than pulling in a templating engine -- it's one page.
+Read-only views of every ticket: GET /tickets (HTML table) and GET
+/tickets.csv (for Google Sheets -- see app/main.py for both routes + the
+token check). Hand-rolled with f-strings + html.escape rather than pulling
+in a templating engine -- it's one page.
 """
+import csv
 import html
+import io
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -72,3 +75,28 @@ def render_tickets_page(tickets: list[dict]) -> str:
   </div>
 </body>
 </html>"""
+
+
+def render_tickets_csv(tickets: list[dict]) -> str:
+    """
+    CSV for Google Sheets' =IMPORTDATA(url) -- pull this URL (with
+    ?token=... appended) into a cell and Sheets refreshes it periodically
+    on its own (roughly hourly; that cadence is controlled by Google, not
+    us). Same columns as the HTML table.
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["id", "reporter", "department", "summary", "status", "due_date", "created_at"])
+    for t in tickets:
+        writer.writerow(
+            [
+                t["id"],
+                t["reporter"],
+                t["department"],
+                t.get("summary") or t["message"],
+                STATUS_LABEL.get(t["status"], t["status"]),
+                t["due_date"] or "",
+                _bangkok_str(t["created_at"]),
+            ]
+        )
+    return buf.getvalue()

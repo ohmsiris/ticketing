@@ -131,16 +131,16 @@ per step 2 above, and you're running.
 
 ```
 app/
-  main.py             FastAPI app: /webhook, /health, /tickets, startup wiring
+  main.py             FastAPI app: /webhook, /health, /tickets(.csv), startup wiring
   config.py            env var loading
   db.py                 SQLite schema + connection helper
   tickets.py             all ticket / user_state queries
   classifier.py            the Claude call that classifies each message
-  line_client.py            LINE reply/push + webhook signature check
+  line_client.py            LINE reply/push + webhook signature check + quick reply
   webhook_handler.py         routes a classified message to an action
   jobs.py                     the two scheduled digest jobs
   strings.py                   every Thai string the bot sends
-  dashboard.py                  renders the /tickets HTML table
+  dashboard.py                  renders /tickets (HTML) and /tickets.csv
 data/
   tickets.db                    created automatically on first run
 ```
@@ -154,6 +154,33 @@ shared token via `DASHBOARD_TOKEN` (see `.env.example`). Visit it as
 `https://your-app.up.railway.app/tickets?token=<DASHBOARD_TOKEN>`. If
 `DASHBOARD_TOKEN` is left blank the page is open to anyone with the URL,
 which is fine for local poking but not recommended once deployed.
+
+### Syncing to Google Sheets
+
+`GET /tickets.csv` (same token) serves the same data as CSV. Google Sheets
+can pull that in and refresh it on its own:
+
+1. Create a new Google Sheet.
+2. In cell A1, enter:
+   ```
+   =IMPORTDATA("https://your-app.up.railway.app/tickets.csv?token=<DASHBOARD_TOKEN>")
+   ```
+3. Sheets fills in the table and refreshes it automatically -- roughly
+   hourly; that cadence is controlled by Google, not this app. To force an
+   immediate refresh, delete and re-enter the formula, or use
+   File → Settings → Recalculation.
+
+Note the token ends up sitting in that cell/formula, visible to anyone you
+share the sheet with (and in the sheet's edit history) -- fine for a
+private personal sheet, worth remembering if you ever share it further.
+
+### Closing a ticket without typing an id
+
+Just describe which one, e.g. "ปิดงานเปลี่ยนน้ำมัน" -- Claude matches it
+against your open tickets by content. If it's genuinely unclear which one
+you mean (a generic "ปิดงาน" with more than one open ticket and nothing to
+tell them apart), the bot sends back a tappable list instead of guessing --
+tap the one you mean, no typing required.
 
 ## Notes / known limits (v0, by design)
 

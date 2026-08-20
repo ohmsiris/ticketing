@@ -10,13 +10,14 @@ Run in production (Railway/Render set $PORT for you):
 """
 import logging
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from app import tickets
 from app.config import settings
-from app.dashboard import render_tickets_page
+from app.dashboard import render_tickets_csv, render_tickets_page
 from app.db import init_db
 from app.jobs import start_scheduler
 from app.line_client import verify_signature
@@ -42,20 +43,39 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/tickets", response_class=HTMLResponse)
-def tickets_dashboard(token: str = ""):
-    # Simple shared-token gate, not real auth -- this is a 2-person pilot
-    # with no login system. Set DASHBOARD_TOKEN and share the link with the
-    # token as a query param, e.g. https://.../tickets?token=xxxx. If it's
-    # not set, the page is left open (with a loud log warning) so this
-    # doesn't block first deploy -- set it before sharing the link around.
+def _check_dashboard_token(token: str, route: str) -> Optional[Response]:
+    """
+    Simple shared-token gate, not real auth -- this is a 2-person pilot with
+    no login system. Set DASHBOARD_TOKEN and pass it as ?token=xxxx. If it's
+    not set, the route is left open (with a loud log warning) so this
+    doesn't block first deploy -- set it before sharing either link around.
+    Returns a 403 Response to short-circuit with, or None to proceed.
+    """
     if settings.dashboard_token:
         if token != settings.dashboard_token:
             return HTMLResponse("Forbidden -- missing or incorrect ?token=", status_code=403)
-    else:
-        logger.warning("DASHBOARD_TOKEN not set -- /tickets is publicly viewable with no token required")
+        return None
+    logger.warning("DASHBOARD_TOKEN not set -- %s is publicly viewable with no token required", route)
+    return None
 
+
+@app.get("/tickets", response_class=HTMLResponse)
+def tickets_dashboard(token: str = ""):
+    denied = _check_dashboard_token(token, "/tickets")
+    if denied is not None:
+        return denied
     return render_tickets_page(tickets.get_all_tickets())
+
+
+@app.get("/tickets.csv")
+def tickets_csv(token: str = ""):
+    denied = _check_dashboard_token(token, "/tickets.csv")
+    if denied is not None:
+        return denied
+    # UTF-8 BOM up front so Excel/Google Sheets' IMPORTDATA correctly detect
+    # the encoding instead of mangling the Thai text.
+    body = "\ufeff" + render_tickets_csv(tickets.get_all_tickets())
+    return Response(content=body, media_type="text/csv; charset=utf-8")
 
 
 @app.post("/webhook")
