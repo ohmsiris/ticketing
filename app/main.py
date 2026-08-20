@@ -21,7 +21,7 @@ from app.dashboard import render_tickets_csv, render_tickets_page
 from app.db import init_db
 from app.jobs import start_scheduler
 from app.line_client import verify_signature
-from app.webhook_handler import handle_message_event
+from app.webhook_handler import handle_follow_event, handle_message_event
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ticketing.main")
@@ -91,10 +91,13 @@ async def webhook(request: Request, x_line_signature: str = Header(default="", a
 
     for event in events:
         try:
-            if event.get("type") == "message":
+            event_type = event.get("type")
+            if event_type == "message":
                 handle_message_event(event)
-            # Other event types (follow, unfollow, join, postback, ...) are
-            # out of scope for v0 and are silently ignored.
+            elif event_type == "follow":
+                handle_follow_event(event)
+            # Other event types (unfollow, join, postback, ...) are out of
+            # scope for v0 and are silently ignored.
         except Exception:
             # One bad event shouldn't take down the rest of the batch or
             # cause LINE to keep retrying the whole webhook delivery.

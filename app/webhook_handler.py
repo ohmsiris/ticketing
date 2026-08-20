@@ -24,6 +24,27 @@ def resolve_reporter(line_user_id: str) -> str | None:
     return None
 
 
+def handle_follow_event(event: dict) -> None:
+    """
+    Fires once when someone adds the bot as a friend (LINE's "follow"
+    event) -- the natural moment to send a welcome/how-to-use message,
+    instead of relying on someone pasting it manually. Unknown senders are
+    just logged (same userId-discovery flow as handle_message_event) and
+    not sent anything, so a stranger who finds the bot doesn't get a peek
+    at what it's for.
+    """
+    source = event.get("source", {})
+    line_user_id = source.get("userId")
+    reply_token = event.get("replyToken")
+
+    reporter = resolve_reporter(line_user_id)
+    if reporter is None:
+        logger.info("follow event from unknown LINE userId=%s -- ignoring", line_user_id)
+        return
+
+    reply_message(reply_token, [strings.welcome_message()])
+
+
 def handle_message_event(event: dict) -> None:
     source = event.get("source", {})
     line_user_id = source.get("userId")
