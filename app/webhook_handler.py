@@ -98,8 +98,14 @@ def _handle_new_ticket(reporter: str, text: str, result: dict, reply_token: str)
     if due_date is not None:
         tickets.set_due_date(reporter, due_date)  # the ticket just created is the most recent open one, still due-date-less
 
+    remind_days_before = result.get("remind_days_before")
+    if remind_days_before is not None:
+        tickets.set_remind_days_before(ticket_id, remind_days_before)
+
     if due_date is not None:
-        reply_texts = [strings.new_ticket_confirmation_with_due_date(ticket_id, summary, department, due_date)]
+        reply_texts = [
+            strings.new_ticket_confirmation_with_due_date(ticket_id, summary, department, due_date, remind_days_before)
+        ]
     else:
         reply_texts = [strings.new_ticket_confirmation(ticket_id, department), strings.ask_due_date()]
 
@@ -112,7 +118,22 @@ def _handle_new_ticket(reporter: str, text: str, result: dict, reply_token: str)
 
 def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> None:
     due_date = tickets.resolve_due_date(result["due_date_days"], result["due_date_calendar"])
+    remind_days_before = result.get("remind_days_before")
+
     if due_date is None:
+        # No due date in this message. If it was a standalone reminder-
+        # lead-time adjustment ("เตือนก่อน 3 วัน" on its own), apply that to
+        # the most recent open ticket rather than treating it as unclear.
+        if remind_days_before is not None:
+            ticket = tickets.most_recent_open_ticket(reporter)
+            if ticket is None:
+                reply_message(reply_token, [strings.no_ticket_for_reminder()])
+                return
+            tickets.set_remind_days_before(ticket["id"], remind_days_before)
+            display_text = ticket["summary"] or ticket["message"]
+            reply_message(reply_token, [strings.remind_days_before_set(ticket["id"], display_text, remind_days_before)])
+            return
+
         reply_message(reply_token, [strings.due_date_unclear()])
         return
 
@@ -125,7 +146,13 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
         reply_message(reply_token, [strings.no_ticket_needs_due_date()])
         return
 
-    reply_message(reply_token, [strings.due_date_set(ticket["id"], ticket["summary"] or ticket["message"], due_date)])
+    if remind_days_before is not None:
+        tickets.set_remind_days_before(ticket["id"], remind_days_before)
+
+    display_text = ticket["summary"] or ticket["message"]
+    reply_message(
+        reply_token, [strings.due_date_set(ticket["id"], display_text, due_date, remind_days_before)]
+    )
 
 
 def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter: list[dict], reply_token: str) -> None:

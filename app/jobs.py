@@ -1,10 +1,13 @@
 """
-The two scheduled jobs, both pushed to Ohm only (v0 scope):
+The scheduled jobs, all pushed to Ohm only (v0 scope):
 
 1. open_tickets_reminder -- every 4 hours during 08:00-20:00 Asia/Bangkok,
    digest of open tickets older than 2 hours.
 2. due_today_digest -- once a day at 08:00 Asia/Bangkok, digest of tickets
    due today.
+3. due_soon_digest -- once a day at 08:00 Asia/Bangkok, heads-up digest of
+   tickets whose due date is exactly N days away, for whichever tickets had
+   an N-day reminder set (see remind_days_before in app/classifier.py).
 """
 import logging
 
@@ -38,6 +41,15 @@ def due_today_digest() -> None:
     logger.info("sent due-today digest for %d ticket(s)", len(due))
 
 
+def due_soon_digest() -> None:
+    due_soon = tickets.get_due_soon_tickets()
+    if not due_soon:
+        return  # nobody has an N-day heads-up landing today
+    push_message(settings.ohm_line_user_id, [strings.due_soon_digest(due_soon)])
+    tickets.mark_due_soon_reminded([t["id"] for t in due_soon])
+    logger.info("sent due-soon digest for %d ticket(s)", len(due_soon))
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone=TIMEZONE)
     scheduler.add_job(
@@ -49,6 +61,11 @@ def start_scheduler() -> BackgroundScheduler:
         due_today_digest,
         CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
         id="due_today_digest",
+    )
+    scheduler.add_job(
+        due_soon_digest,
+        CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
+        id="due_soon_digest",
     )
     scheduler.start()
     logger.info("scheduler started (timezone=%s)", TIMEZONE)

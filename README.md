@@ -11,9 +11,11 @@ scheduled jobs. No external automation tools.
   it means: a new problem to log, a reply about a due date, a "mark this
   done" message, or something else (defaults to a new ticket if unsure).
 - Tickets live in one SQLite file (`data/tickets.db`).
-- Ohm gets a digest of stale open tickets every 4 hours (08:00–20:00
-  Bangkok time), and a "due today" digest once a day at 08:00. Mom doesn't
-  get either digest in v0.
+- Ohm gets three digests: stale open tickets every 4 hours (08:00–20:00
+  Bangkok time), a "due today" digest once a day at 08:00, and -- for any
+  ticket someone asked for an extra heads-up on (e.g. "เตือนก่อน 3 วัน") --
+  a "due soon" digest, also at 08:00, exactly N days ahead of the due date.
+  Mom doesn't get any digest in v0.
 
 See the code for the full behavior — it's short and commented:
 [app/webhook_handler.py](app/webhook_handler.py) (routing logic),

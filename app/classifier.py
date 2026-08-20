@@ -48,6 +48,7 @@ this shape:
   "summary": "<cleaned-up short version of the issue, or null>",
   "due_date_days": <integer or null>,
   "due_date_calendar": "<YYYY-MM-DD or null>",
+  "remind_days_before": <integer or null>,
   "close_ticket_id": <integer or null>,
   "close_specific_no_match": <true or false>
 }}
@@ -58,13 +59,25 @@ track. If it ALSO states a due date/deadline in the same message (e.g. \
 "เปลี่ยนน้ำมันเครื่อง 27/9/69"), extract that date too -- fill \
 due_date_days or due_date_calendar exactly like you would for a \
 due_date_reply, using the date resolution rules below. If no date is \
-mentioned, leave both null.
+mentioned, leave both null. It can also mention a heads-up lead time in \
+the same breath -- see remind_days_before below.
 - "due_date_reply": the message answers a question about a deadline/due \
 date, e.g. "อีก 3 วัน", "อีก2วัน" (same thing, no spaces), "พรุ่งนี้", \
 "วันศุกร์หน้า", or an explicit date. If they gave a relative offset in \
 days, fill due_date_days with that integer and leave due_date_calendar \
 null. If they gave (or implied) a specific calendar date, resolve it to \
-YYYY-MM-DD and fill due_date_calendar, leaving due_date_days null.
+YYYY-MM-DD and fill due_date_calendar, leaving due_date_days null. A \
+message that ONLY sets a reminder lead time (see remind_days_before \
+below), with no due date in it at all, is ALSO a due_date_reply -- leave \
+due_date_days/due_date_calendar both null in that case, it just means \
+"adjust the reminder on my existing ticket, not the due date itself".
+- "remind_days_before": an extra heads-up reminder N days before the due \
+date, on top of the normal due-date reminder -- e.g. "เตือนก่อน 3 วัน", \
+"แจ้งเตือนล่วงหน้า 2 วัน", "เตือนล่วงหน้า5วัน". Put the integer N here. \
+This can appear alongside a due date (new_ticket or due_date_reply) or by \
+itself (due_date_reply, adjusting an already-set ticket). Leave null if \
+nothing about a heads-up/advance reminder is mentioned -- most messages \
+won't have this.
 
 Date resolution rules (for a due date mentioned in either a new_ticket or \
 a due_date_reply message):
@@ -167,6 +180,7 @@ class Classification(TypedDict):
     summary: Optional[str]
     due_date_days: Optional[int]
     due_date_calendar: Optional[str]
+    remind_days_before: Optional[int]
     close_ticket_id: Optional[int]
     close_specific_no_match: bool
 
@@ -178,6 +192,7 @@ def _default_classification() -> Classification:
         "summary": None,
         "due_date_days": None,
         "due_date_calendar": None,
+        "remind_days_before": None,
         "close_ticket_id": None,
         "close_specific_no_match": False,
     }
@@ -248,12 +263,17 @@ def classify(
         if not isinstance(summary, str) or not summary.strip():
             summary = None  # caller falls back to the raw message -- see webhook_handler.py
 
+        remind_days_before = parsed.get("remind_days_before")
+        if not isinstance(remind_days_before, int) or isinstance(remind_days_before, bool) or remind_days_before <= 0:
+            remind_days_before = None  # 0/negative/non-numeric doesn't mean anything as "days before"
+
         result = {
             "intent": intent,
             "department": department,
             "summary": summary,
             "due_date_days": parsed.get("due_date_days"),
             "due_date_calendar": parsed.get("due_date_calendar"),
+            "remind_days_before": remind_days_before,
             "close_ticket_id": parsed.get("close_ticket_id"),
             "close_specific_no_match": bool(parsed.get("close_specific_no_match")),
         }

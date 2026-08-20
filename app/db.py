@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     due_date        TEXT,              -- 'YYYY-MM-DD' or NULL
     created_at      TEXT NOT NULL,     -- ISO 8601 UTC timestamp
     reminded_at     TEXT,              -- ISO 8601 UTC timestamp, last open-ticket reminder
-    due_reminded_at TEXT               -- 'YYYY-MM-DD', date the due-today digest last included this ticket
+    due_reminded_at TEXT,              -- 'YYYY-MM-DD', date the due-today digest last included this ticket
+    remind_days_before  INTEGER,       -- extra heads-up N days before due_date, or NULL for none
+    due_soon_reminded_at TEXT          -- 'YYYY-MM-DD', date the heads-up digest last included this ticket
 );
 
 CREATE TABLE IF NOT EXISTS user_state (
@@ -61,3 +63,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tickets ADD COLUMN department TEXT NOT NULL DEFAULT 'อื่นๆ'")
     if "summary" not in columns:
         conn.execute("ALTER TABLE tickets ADD COLUMN summary TEXT")
+    if "remind_days_before" not in columns:
+        conn.execute("ALTER TABLE tickets ADD COLUMN remind_days_before INTEGER")
+    if "due_soon_reminded_at" not in columns:
+        conn.execute("ALTER TABLE tickets ADD COLUMN due_soon_reminded_at TEXT")

@@ -109,6 +109,33 @@ def set_due_date(reporter: str, due_date: str) -> Optional[dict]:
         conn.close()
 
 
+def set_remind_days_before(ticket_id: int, days: int) -> None:
+    """Sets an extra heads-up reminder N days before due_date for one ticket."""
+    conn = get_conn()
+    try:
+        conn.execute("UPDATE tickets SET remind_days_before = ? WHERE id = ?", (days, ticket_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def most_recent_open_ticket(reporter: str) -> Optional[dict]:
+    """
+    Reporter's most recently created open ticket, regardless of whether it
+    already has a due date. Used when someone sends a standalone reminder-
+    lead-time message ("เตือนก่อน 3 วัน") not attached to a due date change.
+    """
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM tickets WHERE reporter = ? AND status = 'open' ORDER BY created_at DESC, id DESC LIMIT 1",
+            (reporter,),
+        ).fetchone()
+        return _row_to_dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def close_ticket_by_id(ticket_id: int, reporter: str) -> Optional[dict]:
     """
     Scoped to reporter -- previously this closed any ticket id regardless of
@@ -220,6 +247,49 @@ def mark_due_reminded(ticket_ids: list[int]) -> None:
         today = today_bangkok_str()
         conn.executemany(
             "UPDATE tickets SET due_reminded_at = ? WHERE id = ?",
+            [(today, tid) for tid in ticket_ids],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_due_soon_tickets() -> list[dict]:
+    """
+    Open tickets whose due date is exactly remind_days_before days away
+    today (Bangkok), for whoever set that heads-up, and not already
+    included in today's heads-up digest. E.g. remind_days_before=3 fires
+    once, three days before due_date -- separate from get_due_today_tickets,
+    which fires on the day itself regardless of any heads-up setting.
+    """
+    today = today_bangkok_str()
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM tickets
+            WHERE status = 'open'
+              AND remind_days_before IS NOT NULL
+              AND due_date IS NOT NULL
+              AND date(due_date, '-' || remind_days_before || ' days') = ?
+              AND (due_soon_reminded_at IS NULL OR due_soon_reminded_at != ?)
+            ORDER BY due_date ASC
+            """,
+            (today, today),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def mark_due_soon_reminded(ticket_ids: list[int]) -> None:
+    if not ticket_ids:
+        return
+    conn = get_conn()
+    try:
+        today = today_bangkok_str()
+        conn.executemany(
+            "UPDATE tickets SET due_soon_reminded_at = ? WHERE id = ?",
             [(today, tid) for tid in ticket_ids],
         )
         conn.commit()
