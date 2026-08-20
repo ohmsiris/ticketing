@@ -83,8 +83,8 @@ def due_date_in_past(due_date: str) -> str:
 # --- Closing tickets ---
 
 
-def ticket_closed(ticket_id: int) -> str:
-    return f"ปิดงาน #{ticket_id} แล้ว"
+def ticket_closed(ticket_id: int, message: str) -> str:
+    return f"ปิดงาน #{ticket_id} แล้ว\n{_snippet(message)}"
 
 
 def no_open_ticket_to_close() -> str:

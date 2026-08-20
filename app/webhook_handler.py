@@ -197,7 +197,7 @@ def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter:
         if ticket is None:
             reply_message(reply_token, [strings.ticket_not_found_or_closed(ticket_id)])
             return
-        reply_message(reply_token, [strings.ticket_closed(ticket["id"])])
+        reply_message(reply_token, [strings.ticket_closed(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
     if not open_tickets_for_reporter:
@@ -220,7 +220,7 @@ def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter:
         # Generic close phrase, nothing to match against, and only one
         # candidate -- safe to assume that's the one.
         ticket = tickets.close_ticket_by_id(open_tickets_for_reporter[0]["id"], reporter)
-        reply_message(reply_token, [strings.ticket_closed(ticket["id"])])
+        reply_message(reply_token, [strings.ticket_closed(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
     # More than one open ticket and nothing to tell them apart by -- ask via
