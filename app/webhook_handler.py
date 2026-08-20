@@ -92,10 +92,18 @@ def handle_message_event(event: dict) -> None:
         _handle_due_date_reply(reporter, result, reply_token)
     elif intent == "close_ticket":
         _handle_close_ticket(reporter, result, open_tickets_for_reporter, reply_token)
+    elif intent == "other":
+        # Confidently not a report -- greeting, small talk, an unrelated
+        # question. Reply conversationally instead of logging it as a
+        # ticket (see classifier.py for why this is no longer forced into
+        # new_ticket). classify() still defaults to new_ticket on anything
+        # it can't confidently read as "other" either, so a real report
+        # never gets silently dropped here.
+        reply_message(reply_token, [strings.unclear_message()])
     else:
-        # classify() already normalizes unknown/"other" intents to
-        # new_ticket, so this branch should be unreachable -- kept as a
-        # safety net in case that contract ever changes.
+        # Should be unreachable -- classify() only ever returns one of the
+        # four branches above. Kept as a safety net in case that contract
+        # ever changes.
         _handle_new_ticket(reporter, text, result, reply_token)
 
 

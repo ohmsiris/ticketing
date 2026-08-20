@@ -110,6 +110,14 @@ def voice_not_supported() -> str:
     return "ตอนนี้ระบบยังไม่รองรับข้อความเสียง พิมพ์บอกแทนได้ไหมครับ"
 
 
+# --- Confidently not a report (greeting, small talk, unrelated question) --
+# see classify()'s "other" intent in app/classifier.py ---
+
+
+def unclear_message() -> str:
+    return "สวัสดีครับ 🙂 ถ้ามีปัญหาที่ต้องการแจ้ง พิมพ์บอกได้เลยครับ"
+
+
 # --- Mom's onboarding (appended to the end of her confirmation message
 # while ticket_count is low; see app/webhook_handler.py) ---
 

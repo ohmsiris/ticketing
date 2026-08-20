@@ -280,10 +280,18 @@ def classify(
     except Exception:
         logger.exception("classification failed, defaulting to new_ticket")
 
-    # "other" is not something the rest of the app routes on -- fall back to
-    # new_ticket per spec ("default to treating it as new_ticket").
-    routed_intent = result["intent"] if result["intent"] != "other" else "new_ticket"
-    routed = {**result, "intent": routed_intent}
+    # NOTE: "other" used to be force-converted to "new_ticket" here, on the
+    # theory that a low-confidence read should still make a ticket rather
+    # than silently drop a possible report. In practice that meant every
+    # confidently-recognized greeting/small-talk message ("hello", "สวัสดี")
+    # also turned into a spurious ticket, since the classifier correctly
+    # returns "other" for those. The actual "don't silently drop something
+    # that might be a report" safety net is the `except` block above and the
+    # KNOWN_INTENTS check (both already default to new_ticket on their own)
+    # -- a clean, successful "other" classification is a real, confident
+    # answer and gets routed as such (see webhook_handler.py: replies
+    # conversationally, no ticket created).
+    routed = result
 
     # Log the raw message alongside the classification so misclassifications
     # are easy to spot in the platform logs later.
