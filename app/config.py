@@ -4,6 +4,7 @@ present) into one place so every other module just does:
 
     from app.config import settings
 """
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,8 @@ from dotenv import load_dotenv
 # Load .env from the repo root before we read anything. In production
 # (Railway/Render) real env vars are already set and this is a no-op.
 load_dotenv()
+
+logger = logging.getLogger("ticketing.config")
 
 # Timezone used for all "human" dates/times: working hours, the daily digest,
 # and due dates. Everything scheduling-related is anchored to this.
@@ -48,3 +51,16 @@ settings = _load()
 
 # Make sure the directory for the SQLite file exists (e.g. "data/").
 Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
+
+# A relative DB_PATH silently resolves inside the container's own throwaway
+# filesystem instead of a mounted volume -- the sqlite file looks fine right
+# up until the next deploy wipes it with no error anywhere. Only matters on
+# a real deploy (RAILWAY_ENVIRONMENT_NAME is set by Railway itself); a
+# relative path is the correct, harmless default for local dev.
+if os.environ.get("RAILWAY_ENVIRONMENT_NAME") and not Path(settings.db_path).is_absolute():
+    logger.warning(
+        "DB_PATH=%r is a relative path on Railway -- it will NOT persist across redeploys "
+        "unless it's the absolute path your volume is mounted at (e.g. /data/tickets.db). "
+        "See README.md's Railway deploy section.",
+        settings.db_path,
+    )
