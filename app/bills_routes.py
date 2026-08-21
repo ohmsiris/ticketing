@@ -19,8 +19,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app import bills, sheets_client
-from app.bill_extraction import CATEGORIES
+from app import bills, roster_sync, sheets_client
+from app.bill_extraction import CATEGORIES, get_roster_rows
 from app.config import settings
 
 logger = logging.getLogger("ticketing.bills_routes")
@@ -29,8 +29,8 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
 BILL_FORM_FIELDS = (
-    "shop_name", "date", "branch", "vehicle_license", "vehicle_number",
-    "mileage", "next_service_mileage", "total_cost",
+    "shop_name", "date", "branch", "vehicle_license", "vehicle_license_province",
+    "vehicle_number", "mileage", "next_service_mileage", "total_cost",
 )
 
 
@@ -62,7 +62,9 @@ def bill_review(request: Request, bill_id: str, token: str = ""):
     if bill is None:
         return HTMLResponse("ไม่พบบิลนี้", status_code=404)
     return templates.TemplateResponse(
-        request, "review.html", {"bill": bill, "categories": CATEGORIES, "token": token}
+        request,
+        "review.html",
+        {"bill": bill, "categories": CATEGORIES, "token": token, "roster": get_roster_rows()},
     )
 
 
@@ -99,3 +101,34 @@ async def bill_review_submit(request: Request, bill_id: str, token: str = ""):
         logger.error("bill %s saved locally but Google Sheets sync failed -- needs manual attention", bill_id)
 
     return RedirectResponse(url=f"/bills?token={token}", status_code=303)
+
+
+@router.get("/admin/roster-refresh", response_class=HTMLResponse)
+def roster_refresh_now(token: str = ""):
+    """Manually triggers the same roster pull the 03:00 scheduled job runs
+    (app/jobs.py's roster_refresh), so DRIVERS_SHEET_ID + the Drivers-sheet
+    share can be tested right after setting them up, instead of waiting
+    for the next scheduled run. Same token gate as the rest of this
+    router -- this reads/writes a local file, not tickets or bills, but
+    it's still an internal tool, not something to leave open."""
+    if not _token_ok(token):
+        return _forbidden()
+    if not settings.drivers_sheet_id:
+        return HTMLResponse("DRIVERS_SHEET_ID isn't set -- nothing to refresh from. See README.", status_code=200)
+    try:
+        updated = roster_sync.refresh_roster()
+    except Exception as exc:  # refresh_roster() itself shouldn't raise, but don't 500 if something unexpected slips through
+        logger.exception("manual roster refresh failed unexpectedly")
+        return HTMLResponse(f"Failed: {exc}", status_code=500)
+
+    rows = roster_sync._load_current_rows()
+    branches = sorted({r.get("branch", "") for r in rows if r.get("branch")})
+    if updated:
+        msg = f"Roster updated: now {len(rows)} rows across branches {branches}."
+    else:
+        msg = (
+            f"No update written (either the sheet's data hasn't changed, or the pull looked "
+            f"suspicious and was rejected -- check Railway logs for 'roster_sync'). "
+            f"Current file still has {len(rows)} rows across branches {branches}."
+        )
+    return HTMLResponse(msg)

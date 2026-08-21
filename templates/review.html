@@ -15,6 +15,10 @@
         </h1>
         <p class="subtitle">อ่านจาก: {{ bill.source_photos }}</p>
 
+        {% if bill.vehicle_match_warning %}
+        <p class="warning-banner">⚠️ {{ bill.vehicle_match_warning }}</p>
+        {% endif %}
+
         <form method="POST" action="/bills/{{ bill.bill_id }}?token={{ token }}" id="review-form">
             <input type="hidden" name="row_ids" id="row_ids">
 
@@ -30,10 +34,15 @@
                     <input type="text" name="branch" value="{{ bill.branch or '' }}">
                 </label>
                 <label class="flag-field">ทะเบียนรถ (ตรวจสอบอีกครั้ง)
-                    <input type="text" name="vehicle_license" value="{{ bill.vehicle_license or '' }}">
+                    <input type="text" name="vehicle_license" id="vehicle_license" value="{{ bill.vehicle_license or '' }}">
                 </label>
-                <label>เบอร์รถ
-                    <input type="text" name="vehicle_number" value="{{ bill.vehicle_number or '' }}">
+                <label>จังหวัด (ป้ายทะเบียน)
+                    <input type="text" name="vehicle_license_province" id="vehicle_license_province" value="{{ bill.vehicle_license_province or '' }}">
+                </label>
+                <label id="vehicle_number_label" class="{{ 'flag-field' if not bill.vehicle_number }}">เบอร์รถ
+                    <input type="text" name="vehicle_number" id="vehicle_number" value="{{ bill.vehicle_number or '' }}"
+                           placeholder="{{ 'ไม่พบเบอร์รถ โปรดตรวจสอบทะเบียน' if not bill.vehicle_number else '' }}">
+                    <span id="vehicle_match_hint" class="match-hint"></span>
                 </label>
                 <label>เลขไมล์
                     <input type="text" name="mileage" value="{{ bill.mileage or '' }}">
@@ -97,6 +106,52 @@
 
     <script>
         const CATEGORIES = {{ categories | tojson }};
+        const ROSTER = {{ roster | tojson }};
+
+        // Mirrors app/bill_extraction.py's _normalize_plate + lookup_vehicle
+        // (plate-keyed, never truck-number-keyed -- see that function's
+        // docstring for why) so correcting a plate here can auto-fill the
+        // truck number without a round-trip to the server. Keep this in
+        // sync if the Python version's matching rules ever change.
+        function normalizePlate(plate) {
+            return (plate || "").replace(/\s+/g, "");
+        }
+
+        function lookupVehicle(plateRaw) {
+            const plate = normalizePlate(plateRaw);
+            if (!plate) return null;
+            const candidates = ROSTER.filter(function (r) {
+                const rp = normalizePlate(r.plate);
+                return rp && (rp === plate || plate.indexOf(rp) !== -1 || rp.indexOf(plate) !== -1);
+            });
+            if (candidates.length === 0) return null;
+            const exact = candidates.filter(function (r) { return normalizePlate(r.plate) === plate; });
+            const pool = exact.length ? exact : candidates;
+            const distinctVehicles = new Set(pool.map(function (r) { return r.branch + "|" + r.truck_number; }));
+            if (distinctVehicles.size > 1) return null;  // ambiguous -- same rule as the server side
+            return pool[0];
+        }
+
+        function onVehicleLicenseInput() {
+            const licenseInput = document.getElementById("vehicle_license");
+            const numberInput = document.getElementById("vehicle_number");
+            const provinceInput = document.getElementById("vehicle_license_province");
+            const label = document.getElementById("vehicle_number_label");
+            const hint = document.getElementById("vehicle_match_hint");
+
+            const match = lookupVehicle(licenseInput.value);
+            if (!match) {
+                hint.textContent = "";
+                return;  // don't clear a manually-typed number just because there's no match yet
+            }
+            numberInput.value = match.truck_number || "";
+            if (!provinceInput.value.trim() && match.province) {
+                provinceInput.value = match.province;
+            }
+            label.classList.remove("flag-field");
+            numberInput.placeholder = "";
+            hint.textContent = "✓ พบในทะเบียน (" + match.branch + ")";
+        }
         // New rows use a "new"-prefixed id, never a plain number -- real
         // rows are keyed by their SQLite id (a global autoincrement, not
         // reset per bill), so a plain numeric counter here could someday
@@ -147,6 +202,7 @@
         }
 
         refreshRowState();
+        document.getElementById("vehicle_license").addEventListener("input", onVehicleLicenseInput);
     </script>
 </body>
 </html>

@@ -94,23 +94,45 @@ EXTRACTION_SCHEMA = {
         "vehicle_license": {
             "type": "string",
             "description": (
-                "The vehicle's plate number, written in the original language "
-                "exactly as shown on the bill (do not translate or add an "
-                "English transliteration). This is NOT always near the top "
-                "of the bill -- look over the WHOLE page, since it's "
-                "sometimes written in the middle of the page instead. A "
-                "reference list of a FEW known vehicles may be provided "
-                "below, but it is heavily incomplete -- most real, "
-                "legitimate plates will NOT be on it, even ones from the "
-                "same branch. Only use that list as a tie-breaker when the "
-                "handwriting is genuinely ambiguous between two "
-                "similar-looking characters (e.g. it could be a 4 or could "
-                "be an 8) AND one reading matches the list. Do NOT change a "
-                "clearly-written plate to match the list just because it's "
-                "close -- transcribe exactly what's actually written by "
-                "default, since the true vehicle very likely just isn't on "
-                "this short partial list. Empty string if no plate is "
+                "The vehicle's plate NUMBER ONLY, written in the original "
+                "language exactly as shown on the bill (do not translate or "
+                "add an English transliteration) -- do NOT include the "
+                "province name here, that goes in vehicle_license_province "
+                "below (e.g. a plate reading '1ฒย 4267 กทม' becomes "
+                "vehicle_license='1ฒย 4267' and vehicle_license_province="
+                "'กทม'). This is NOT always near the top of the bill -- "
+                "look over the WHOLE page, since it's sometimes written in "
+                "the middle of the page instead. A reference list of the "
+                "known fleet may be provided below -- this is a small, "
+                "mostly closed fleet (around 50-70 vehicles total across "
+                "both branches), so a plate that doesn't appear on it is "
+                "the unusual case, not the norm, and is more often a "
+                "misread digit than a genuinely new vehicle. If your first "
+                "reading doesn't match anything on the list, look again "
+                "character by character before finalizing -- check "
+                "specifically for commonly confused digits (4/9, 3/8, 1/7, "
+                "0/6) -- and only keep a no-match reading if you're still "
+                "confident after that second look. That said, never force "
+                "a clearly-legible plate to match the list just because "
+                "it's close if you're genuinely confident in what's "
+                "written -- the fleet does occasionally add new vehicles "
+                "or use a rented/dealership loaner truck, so a real "
+                "no-match is still possible. Empty string if no plate is "
                 "present or legible at all."
+            ),
+        },
+        "vehicle_license_province": {
+            "type": "string",
+            "description": (
+                "The province name shown with the plate, if any (Thai "
+                "plates commonly show one below/beside the number) -- "
+                "common ones for this fleet include กทม/กรุงเทพมหานคร "
+                "(Bangkok), นนทบุรี (Nonthaburi), สระบุรี (Saraburi), and "
+                "ยโสธร (Yasothon), but transcribe whatever province is "
+                "actually written, even if it's not one of these. Keep "
+                "whatever abbreviation/form is actually written (don't "
+                "expand 'กทม' to the full 'กรุงเทพมหานคร' or vice versa). "
+                "Empty string if no province is shown."
             ),
         },
         "vehicle_number": {
@@ -118,11 +140,14 @@ EXTRACTION_SCHEMA = {
             "description": (
                 "The fleet truck number, ONLY if it's actually written on "
                 "the bill itself (e.g. 'เบอร์ 18', 'รถเบอร์ 1', or similar) "
-                "-- do not infer or guess this from the plate, even if a "
-                "reference list below happens to show a matching plate; a "
-                "separate, more reliable lookup step handles that "
-                "afterward. Empty string if no truck number is written on "
-                "the bill."
+                "-- write ONLY the number itself as plain digits (e.g. "
+                "'18'), NEVER include the word 'เบอร์'/'รถเบอร์' or any "
+                "other label text in this field, since it gets displayed "
+                "elsewhere already labeled as a truck number. Do not infer "
+                "or guess this from the plate, even if a reference list "
+                "below happens to show a matching plate; a separate, more "
+                "reliable lookup step handles that afterward. Empty string "
+                "if no truck number is written on the bill."
             ),
         },
         "mileage": {
@@ -267,9 +292,9 @@ EXTRACTION_SCHEMA = {
         },
     },
     "required": [
-        "shop_name", "date", "branch", "vehicle_license", "vehicle_number",
-        "mileage", "next_service_mileage", "total_cost", "has_total_this_page",
-        "continues_next_page", "line_items",
+        "shop_name", "date", "branch", "vehicle_license", "vehicle_license_province",
+        "vehicle_number", "mileage", "next_service_mileage", "total_cost",
+        "has_total_this_page", "continues_next_page", "line_items",
     ],
     "additionalProperties": False,
 }
@@ -319,20 +344,50 @@ which one is actually written:
 similar handwritten; check the last character carefully."""
 
 
-def _load_vehicle_roster_text() -> str:
+def _load_roster_rows() -> list[dict]:
     if not VEHICLE_ROSTER_PATH.exists():
-        return ""
+        return []
     with open(VEHICLE_ROSTER_PATH, encoding="utf-8-sig") as f:
-        rows = list(csv.DictReader(f))
+        return list(csv.DictReader(f))
+
+
+def get_roster_rows() -> list[dict]:
+    """Public wrapper for app/bills_routes.py -- the review page ships this
+    to the browser as JSON so it can auto-fill vehicle_number/province
+    client-side the moment a manager types a plate that matches, instead
+    of only running the same lookup server-side at extraction time."""
+    return _load_roster_rows()
+
+
+def _load_vehicle_roster_text() -> str:
+    rows = _load_roster_rows()
     if not rows:
         return ""
-    lines = [f"- Truck #{r['truck_number']}: plate {r['plate']} ({r['brand']})" for r in rows]
+    lines = []
+    for r in rows:
+        bits = [f"branch={r.get('branch','')}", f"truck#={r.get('truck_number','')}", f"plate={r.get('plate','')}"]
+        if r.get("province"):
+            bits.append(f"province={r['province']}")
+        if r.get("vehicle_type"):
+            bits.append(r["vehicle_type"])  # e.g. รถใหญ่ (big truck) / รถเล็ก (pickup)
+        make_model = f"{r.get('make','')} {r.get('model','')}".strip()
+        if make_model:
+            bits.append(make_model)
+        lines.append("- " + ", ".join(bits))
     return (
-        "A PARTIAL, incomplete sample of some known vehicles (truck number, "
-        "plate, brand) -- this is NOT a complete list, not even for one "
-        "branch. Most real plates, including many Saraburi trucks and any "
-        "truck from other branches (e.g. Kaeng Khoi), will NOT appear "
-        "here:\n" + "\n".join(lines)
+        "Known fleet vehicles -- a small, mostly closed fleet of roughly "
+        "50-70 trucks across both branches, so treat a plate NOT on this "
+        "list as the unusual case worth double-checking, not the norm. "
+        "That said, this list is manager-maintained and can still be "
+        "slightly out of date (a new vehicle, a re-plated truck), so it's "
+        "a strong hint, not absolute ground truth. IMPORTANT: truck "
+        "numbers are NOT unique across branches -- e.g. 'truck #6' exists "
+        "in BOTH Saraburi and Kaeng Khoi as two entirely different real "
+        "vehicles, and most numbers 1-10 are duplicated this way. Never "
+        "assume which branch a bare truck number belongs to from this "
+        "list alone -- only use it to help read an ambiguous PLATE, since "
+        "plates (unlike truck numbers) are genuinely unique per "
+        "vehicle:\n" + "\n".join(lines)
     )
 
 
@@ -340,26 +395,54 @@ def _normalize_plate(plate: str) -> str:
     return "".join(plate.split())
 
 
-def lookup_truck_number(plate: str) -> str:
-    """Deterministic plate -> truck number lookup, tolerating minor
-    formatting differences (missing space, an added province suffix like
-    'กท'). Returns "" if nothing matches. See bill_extraction.py's OCR
-    project counterpart for the full reasoning."""
+# Words the model sometimes bakes into vehicle_number itself even though the
+# schema asks for digits only (e.g. "เบอร์ 34" instead of "34") -- stripped
+# defensively here rather than trusting the prompt alone, since this value
+# gets displayed already-labeled elsewhere (e.g. "(เบอร์ {vehicle_number})"),
+# and a leftover "เบอร์" prefix shows up doubled.
+_VEHICLE_NUMBER_LABEL_PREFIXES = ("รถเบอร์", "เบอร์รถ", "เบอร์")
+
+
+def _clean_vehicle_number(raw: str) -> str:
+    value = raw.strip()
+    for prefix in _VEHICLE_NUMBER_LABEL_PREFIXES:
+        if value.startswith(prefix):
+            value = value[len(prefix):].strip(" :.-")
+            break
+    return value
+
+
+def lookup_vehicle(plate: str) -> Optional[dict]:
+    """Deterministic plate -> roster row lookup (branch, truck_number,
+    plate, province, make, model), tolerating minor formatting
+    differences (missing space, an added province suffix like 'กท').
+    Plates are the reliable unique key here -- truck numbers are NOT (the
+    same number exists in both branches for different real trucks), so
+    this never looks anything up by truck number alone.
+
+    Returns None if nothing matches, OR if the plate matches more than
+    one roster row for genuinely different vehicles -- safer to leave it
+    unresolved (and let a human notice) than to silently guess one."""
     plate_norm = _normalize_plate(plate)
-    if not plate_norm or not VEHICLE_ROSTER_PATH.exists():
-        return ""
-    with open(VEHICLE_ROSTER_PATH, encoding="utf-8-sig") as f:
-        roster = {
-            _normalize_plate(row["plate"]): row["truck_number"]
-            for row in csv.DictReader(f)
-            if row.get("plate") and row.get("truck_number")
-        }
-    if plate_norm in roster:
-        return roster[plate_norm]
-    for roster_plate_norm, truck_number in roster.items():
-        if roster_plate_norm and (roster_plate_norm in plate_norm or plate_norm in roster_plate_norm):
-            return truck_number
-    return ""
+    if not plate_norm:
+        return None
+    rows = _load_roster_rows()
+
+    def fuzzy_match(row_plate_norm: str) -> bool:
+        return bool(row_plate_norm) and (
+            row_plate_norm == plate_norm or row_plate_norm in plate_norm or plate_norm in row_plate_norm
+        )
+
+    candidates = [r for r in rows if r.get("plate") and fuzzy_match(_normalize_plate(r["plate"]))]
+    if not candidates:
+        return None
+    exact = [r for r in candidates if _normalize_plate(r["plate"]) == plate_norm]
+    pool = exact or candidates
+    distinct_vehicles = {(r.get("branch", ""), r.get("truck_number", "")) for r in pool}
+    if len(distinct_vehicles) > 1:
+        logger.warning("plate %r matches multiple roster entries ambiguously: %s", plate, distinct_vehicles)
+        return None
+    return pool[0]
 
 
 def _content_block(file_bytes: bytes, media_type: str) -> dict:
@@ -403,11 +486,28 @@ def extract_bill(file_bytes: bytes, media_type: str) -> dict:
 
     text_block = next(b.text for b in response.content if b.type == "text")
     bill = json.loads(text_block)
+    bill["vehicle_number"] = _clean_vehicle_number(bill.get("vehicle_number") or "")
 
-    # Deterministic enrichment -- see lookup_truck_number's docstring.
+    # Deterministic enrichment + validation against the roster -- see
+    # lookup_vehicle's docstring for why this is plate-keyed, never
+    # truck-number-keyed. Builds a plain-language warning (empty string
+    # if nothing to flag) surfaced downstream in the review page and the
+    # manager's LINE notification.
+    warnings = []
+    match = lookup_vehicle(bill.get("vehicle_license") or "")
+    if match:
+        if not (bill.get("vehicle_number") or "").strip():
+            bill["vehicle_number"] = match.get("truck_number", "")
+        if not (bill.get("vehicle_license_province") or "").strip():
+            bill["vehicle_license_province"] = match.get("province", "")
+        bill_branch = (bill.get("branch") or "").strip()
+        roster_branch = (match.get("branch") or "").strip()
+        if bill_branch and roster_branch and bill_branch != roster_branch:
+            warnings.append(
+                f"ป้ายทะเบียนตรงกับรถของสาขา{roster_branch} แต่บิลระบุสาขา{bill_branch} -- ช่วยตรวจสอบด้วย"
+            )
     if not (bill.get("vehicle_number") or "").strip():
-        truck_number = lookup_truck_number(bill.get("vehicle_license") or "")
-        if truck_number:
-            bill["vehicle_number"] = truck_number
+        warnings.append("ไม่พบเบอร์รถที่ตรงกัน กรุณาตรวจสอบและกรอกเบอร์รถเอง")
 
+    bill["vehicle_match_warning"] = " / ".join(warnings)
     return bill

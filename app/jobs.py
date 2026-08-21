@@ -13,13 +13,19 @@ The scheduled jobs. All pushed to Ohm only, except #4:
    who reported it. Deliberately just the one daily message, not the every-
    4h treatment #1 gets -- and unlike #2/#3, no "already reminded" guard,
    since the point is to re-show whatever's still outstanding each day.
+5. roster_refresh -- once a day at 03:00 Asia/Bangkok (quiet hours), re-
+   pulls app/vehicle_roster.csv from the real Drivers Google Sheet so
+   plate/truck-number edits made there show up in bill matching without
+   a developer manually re-syncing. See app/roster_sync.py for the
+   parsing + safety-net details. No-op (skipped, not an error) if
+   DRIVERS_SHEET_ID isn't configured.
 """
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app import strings, tickets
+from app import roster_sync, strings, tickets
 from app.config import TIMEZONE, settings
 from app.line_client import push_message
 
@@ -63,6 +69,10 @@ def mom_car_reminder() -> None:
     logger.info("sent mom's daily car reminder for %d ticket(s)", len(car_tickets))
 
 
+def roster_refresh() -> None:
+    roster_sync.refresh_roster()
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone=TIMEZONE)
     scheduler.add_job(
@@ -84,6 +94,11 @@ def start_scheduler() -> BackgroundScheduler:
         mom_car_reminder,
         CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
         id="mom_car_reminder",
+    )
+    scheduler.add_job(
+        roster_refresh,
+        CronTrigger(hour=3, minute=0, timezone=TIMEZONE),
+        id="roster_refresh",
     )
     scheduler.start()
     logger.info("scheduler started (timezone=%s)", TIMEZONE)

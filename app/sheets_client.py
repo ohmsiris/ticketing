@@ -7,6 +7,11 @@ Railway, indefinitely.
 Deliberately only ever called AFTER a manager confirms a bill on the
 review webpage (see app/bills_routes.py) -- the Sheets should only ever
 hold verified data, never a raw AI guess.
+
+Upsert, not append-only: a bill can be re-confirmed (e.g. the manager
+opens an already-verified bill and fixes something), and that must
+UPDATE the existing Sheet row(s) for that bill_id rather than adding a
+duplicate. bill_id is unique per bill, so it's the natural lookup key.
 """
 import json
 import logging
@@ -23,8 +28,9 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 BILLS_HEADER = [
     "bill_id", "status", "source_type", "shop_name", "date", "branch",
-    "vehicle_license", "vehicle_number", "mileage", "next_service_mileage",
-    "total_cost", "source_photos", "created_at", "verified_at", "verified_by",
+    "vehicle_license", "vehicle_license_province", "vehicle_number",
+    "mileage", "next_service_mileage", "total_cost", "source_photos",
+    "created_at", "verified_at", "verified_by",
 ]
 LINE_ITEMS_HEADER = [
     "bill_id", "line_item_number", "description", "category",
@@ -34,13 +40,22 @@ LINE_ITEMS_HEADER = [
 _client: Optional[gspread.Client] = None
 
 
-def _client_lazy() -> gspread.Client:
+def get_client() -> gspread.Client:
+    """The shared authorized gspread client (lazy singleton). Public so
+    other modules that need to read a *different* sheet with the same
+    service account -- e.g. app/roster_sync.py reading the Drivers sheet
+    -- don't each load and authorize their own copy of the credentials."""
     global _client
     if _client is None:
         info = json.loads(settings.google_service_account_json)
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
         _client = gspread.authorize(creds)
     return _client
+
+
+# Old private name, kept as an alias in case anything else in this file
+# still calls it below.
+_client_lazy = get_client
 
 
 def _ensure_header(sheet, expected_header: list[str]) -> None:
@@ -50,36 +65,62 @@ def _ensure_header(sheet, expected_header: list[str]) -> None:
         sheet.append_row(expected_header)
 
 
-def append_bill(bill: dict) -> None:
+def _bills_sheet():
     sheet = _client_lazy().open_by_key(settings.bills_sheet_id).sheet1
     _ensure_header(sheet, BILLS_HEADER)
-    sheet.append_row(
-        [bill.get(col, "") for col in BILLS_HEADER],
-        value_input_option="USER_ENTERED",
-    )
+    return sheet
 
 
-def append_line_items(bill_id: str, line_items: list[dict]) -> None:
-    if not line_items:
-        return
+def _line_items_sheet():
     sheet = _client_lazy().open_by_key(settings.line_items_sheet_id).sheet1
     _ensure_header(sheet, LINE_ITEMS_HEADER)
+    return sheet
+
+
+def upsert_bill(bill: dict) -> None:
+    """Updates the existing row for this bill_id if one exists (column A
+    is always bill_id), otherwise appends a new row."""
+    sheet = _bills_sheet()
+    values = [bill.get(col, "") for col in BILLS_HEADER]
+    existing = sheet.find(bill["bill_id"], in_column=1)
+    if existing is not None:
+        sheet.update(
+            f"A{existing.row}:{gspread.utils.rowcol_to_a1(existing.row, len(BILLS_HEADER))}",
+            [values],
+            value_input_option="USER_ENTERED",
+        )
+    else:
+        sheet.append_row(values, value_input_option="USER_ENTERED")
+
+
+def replace_line_items(bill_id: str, line_items: list[dict]) -> None:
+    """Deletes every existing row for this bill_id, then appends the
+    current set -- simpler and safer than trying to diff/patch individual
+    rows when items can be added or removed between edits."""
+    sheet = _line_items_sheet()
+    existing_cells = sheet.findall(bill_id, in_column=1)
+    if existing_cells:
+        # Delete from the bottom up so earlier row numbers stay valid as
+        # later ones are removed.
+        for cell in sorted(existing_cells, key=lambda c: c.row, reverse=True):
+            sheet.delete_rows(cell.row)
+    if not line_items:
+        return
     rows = [[bill_id] + [item.get(col, "") for col in LINE_ITEMS_HEADER[1:]] for item in line_items]
     sheet.append_rows(rows, value_input_option="USER_ENTERED")
 
 
 def sync_verified_bill(bill: dict) -> bool:
-    """Writes one verified bill + its line items to the real Sheets.
-    Returns True on success. Deliberately doesn't raise on failure --
-    the SQLite row is already the source of truth and stays 'verified'
-    either way; a failed Sheets sync is logged loudly so it's visible,
-    but shouldn't block the manager's flow or lose their edits. (No
-    retry queue yet -- a known v1 gap; re-running the review page's
-    submit would just append a duplicate row, so a failed sync currently
-    needs a manual copy into the Sheet rather than a resubmit.)"""
+    """Writes one verified bill + its line items to the real Sheets,
+    updating in place if this bill_id was already synced before (see
+    upsert_bill / replace_line_items). Returns True on success.
+    Deliberately doesn't raise on failure -- the SQLite row is already
+    the source of truth and stays 'verified' either way; a failed Sheets
+    sync is logged loudly so it's visible, but shouldn't block the
+    manager's flow or lose their edits."""
     try:
-        append_bill(bill)
-        append_line_items(bill["bill_id"], bill.get("line_items") or [])
+        upsert_bill(bill)
+        replace_line_items(bill["bill_id"], bill.get("line_items") or [])
         logger.info("synced bill %s to Google Sheets OK", bill.get("bill_id"))
         return True
     except Exception:

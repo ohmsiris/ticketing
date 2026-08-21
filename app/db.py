@@ -54,7 +54,9 @@ CREATE TABLE IF NOT EXISTS bills (
     date                  TEXT,
     branch                TEXT,
     vehicle_license       TEXT,
+    vehicle_license_province TEXT,
     vehicle_number        TEXT,
+    vehicle_match_warning TEXT,  -- plain-language flag from bill_extraction.lookup_vehicle, e.g. no roster match found
     mileage               TEXT,
     next_service_mileage  TEXT,
     total_cost            TEXT,
@@ -117,3 +119,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tickets ADD COLUMN due_soon_reminded_at TEXT")
     if "cancelled_at" not in columns:
         conn.execute("ALTER TABLE tickets ADD COLUMN cancelled_at TEXT")
+
+    bill_columns = {row["name"] for row in conn.execute("PRAGMA table_info(bills)").fetchall()}
+    if "vehicle_license_province" not in bill_columns:
+        conn.execute("ALTER TABLE bills ADD COLUMN vehicle_license_province TEXT")
+    if "vehicle_match_warning" not in bill_columns:
+        conn.execute("ALTER TABLE bills ADD COLUMN vehicle_match_warning TEXT")

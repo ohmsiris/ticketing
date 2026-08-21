@@ -184,6 +184,39 @@ you mean (a generic "ปิดงาน" with more than one open ticket and noth
 tell them apart), the bot sends back a tappable list instead of guessing --
 tap the one you mean, no typing required.
 
+## Bill tracking (repair bill photos -> review page -> Sheets)
+
+Photographed/PDF repair bills sent to the bot are read by Claude, held for
+a manager's review at `/bills?token=...`, then synced to two real Google
+Sheets (Bills, LineItems) once confirmed. See `.env.example` for the full
+list of `GOOGLE_SERVICE_ACCOUNT_JSON` / `BILLS_SHEET_ID` /
+`LINE_ITEMS_SHEET_ID` / `REVIEW_TOKEN` / `PUBLIC_BASE_URL` variables this
+needs -- the service account is a Google Cloud service account (JSON key,
+not a personal login), shared as an Editor on both Sheets.
+
+### Vehicle roster auto-refresh
+
+Bill matching (which truck a plate belongs to, catching a mismatched
+branch) reads `app/vehicle_roster.csv`. That file is kept in sync
+automatically, once a day at 03:00 Asia/Bangkok, from the real "Drivers"
+Google Sheet (see `app/roster_sync.py`) -- no manual re-export needed
+after someone edits a plate or adds a truck there.
+
+To turn this on:
+1. Share the Drivers sheet with the **same service account** used above
+   (its email is the `client_email` field inside your
+   `GOOGLE_SERVICE_ACCOUNT_JSON`) -- Viewer access is enough.
+2. Set `DRIVERS_SHEET_ID` (from that sheet's URL) in your env vars.
+3. Optional: `DRIVERS_ROSTER_WORKSHEET` if the roster tables aren't on the
+   sheet's first tab.
+
+Leave `DRIVERS_SHEET_ID` blank to disable this entirely -- the app keeps
+using whatever `app/vehicle_roster.csv` already has committed to it, same
+as before this feature existed. The refresh never overwrites the CSV with
+data that looks broken (e.g. far fewer rows than before, or only one
+branch found) -- it logs a warning and leaves the last-known-good file in
+place, checkable any time in Railway's logs (search for `roster_sync`).
+
 ## Notes / known limits (v0, by design)
 
 - Text only. Voice notes get a polite "not supported yet, please type it"

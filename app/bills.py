@@ -27,8 +27,8 @@ TOTAL_TOLERANCE_FLOOR = 50  # baht
 TOTAL_TOLERANCE_FRACTION = 0.10  # plus up to 10% of the final page's total
 
 BILL_FIELDS = (
-    "shop_name", "date", "branch", "vehicle_license", "vehicle_number",
-    "mileage", "next_service_mileage",
+    "shop_name", "date", "branch", "vehicle_license", "vehicle_license_province",
+    "vehicle_number", "mileage", "next_service_mileage",
 )
 
 
@@ -104,13 +104,15 @@ def create_bill(reporter: str, source_type: str, extracted: dict, source_photo_i
         conn.execute(
             """INSERT INTO bills (
                 bill_id, status, source_type, reporter, shop_name, date, branch,
-                vehicle_license, vehicle_number, mileage, next_service_mileage,
+                vehicle_license, vehicle_license_province, vehicle_number,
+                vehicle_match_warning, mileage, next_service_mileage,
                 total_cost, source_photos, continues_next_page, created_at
-            ) VALUES (?, 'pending_review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES (?, 'pending_review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 bill_id, source_type, reporter,
                 extracted.get("shop_name", ""), extracted.get("date", ""), extracted.get("branch", ""),
-                extracted.get("vehicle_license", ""), extracted.get("vehicle_number", ""),
+                extracted.get("vehicle_license", ""), extracted.get("vehicle_license_province", ""),
+                extracted.get("vehicle_number", ""), extracted.get("vehicle_match_warning", ""),
                 extracted.get("mileage", ""), extracted.get("next_service_mileage", ""),
                 extracted.get("total_cost", ""), source_photo_id,
                 1 if extracted.get("continues_next_page") else 0,
