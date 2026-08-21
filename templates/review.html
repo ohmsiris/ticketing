@@ -31,7 +31,7 @@
                     <input type="text" name="date" value="{{ bill.date or '' }}">
                 </label>
                 <label>สาขา
-                    <input type="text" name="branch" value="{{ bill.branch or '' }}">
+                    <input type="text" name="branch" id="branch" value="{{ bill.branch or '' }}">
                 </label>
                 <label class="flag-field">ทะเบียนรถ (ตรวจสอบอีกครั้ง)
                     <input type="text" name="vehicle_license" id="vehicle_license" value="{{ bill.vehicle_license or '' }}">
@@ -140,18 +140,23 @@
             const licenseInput = document.getElementById("vehicle_license");
             const numberInput = document.getElementById("vehicle_number");
             const provinceInput = document.getElementById("vehicle_license_province");
+            const branchInput = document.getElementById("branch");
             const label = document.getElementById("vehicle_number_label");
             const hint = document.getElementById("vehicle_match_hint");
 
             const match = lookupVehicle(licenseInput.value);
             if (!match) {
                 hint.textContent = "";
-                return;  // don't clear a manually-typed number just because there's no match yet
+                return;  // don't clear manually-typed fields just because there's no match yet
             }
+            // Once the plate is confirmed correct (that's what typing here
+            // means), everything derived from it -- truck #, province,
+            // branch -- should follow the roster rather than whatever the
+            // AI's independent first-pass guess was, since that guess is
+            // exactly what a mismatch warning would otherwise be flagging.
             numberInput.value = match.truck_number || "";
-            if (!provinceInput.value.trim() && match.province) {
-                provinceInput.value = match.province;
-            }
+            if (match.province) provinceInput.value = match.province;
+            if (match.branch) branchInput.value = match.branch;
             label.classList.remove("flag-field");
             numberInput.placeholder = "";
             hint.textContent = "✓ พบในทะเบียน (" + match.branch + ")";
@@ -197,6 +202,12 @@
             recalcTotal();
         }
 
+        // Whole numbers stay whole (matches how these bills' numbers are
+        // normally written); otherwise keep up to 2 decimal places.
+        function formatMoney(n) {
+            return Number.isInteger(n) ? String(n) : n.toFixed(2);
+        }
+
         // Sums every line item's ราคารวม (cost_*) field into ยอดรวม, live,
         // as the manager edits any of them -- they can still type over the
         // result by hand afterward (e.g. the real total includes VAT or a
@@ -209,10 +220,25 @@
                 const value = parseFloat(input.value);
                 if (!isNaN(value)) sum += value;
             });
-            // Whole numbers stay whole (matches how these bills' totals are
-            // normally written); otherwise keep up to 2 decimal places.
-            const totalInput = document.getElementById("total_cost");
-            totalInput.value = Number.isInteger(sum) ? String(sum) : sum.toFixed(2);
+            document.getElementById("total_cost").value = formatMoney(sum);
+        }
+
+        // Recomputes one row's ราคารวม as จำนวน x ราคาต่อหน่วย when either
+        // changes. Only when quantity is actually a positive number --
+        // labor/service rows (ค่าแรง etc.) normally have quantity=0 with a
+        // flat cost typed directly and no meaningful unit price, so this
+        // deliberately leaves cost alone for those rather than zeroing it
+        // out the moment someone touches the quantity field.
+        function recalcRowCost(row) {
+            const quantityInput = row.querySelector('input[name^="quantity_"]');
+            const unitPriceInput = row.querySelector('input[name^="unit_price_"]');
+            const costInput = row.querySelector('input[name^="cost_"]');
+            const quantity = parseFloat(quantityInput.value);
+            const unitPrice = parseFloat(unitPriceInput.value);
+            if (quantity > 0 && !isNaN(unitPrice)) {
+                costInput.value = formatMoney(quantity * unitPrice);
+                recalcTotal();
+            }
         }
 
         function refreshRowState() {
@@ -230,7 +256,12 @@
         // Delegated on the tbody (not each input directly) so rows added
         // later via addRow() are covered without re-binding anything.
         document.getElementById("line-items-body").addEventListener("input", function (e) {
-            if (e.target.name && e.target.name.startsWith("cost_")) recalcTotal();
+            const name = e.target.name || "";
+            if (name.startsWith("quantity_") || name.startsWith("unit_price_")) {
+                recalcRowCost(e.target.closest("tr"));
+            } else if (name.startsWith("cost_")) {
+                recalcTotal();
+            }
         });
     </script>
 </body>
