@@ -10,12 +10,15 @@ Run in production (Railway/Render set $PORT for you):
 """
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from app import tickets
+from app.bills_routes import router as bills_router
 from app.config import settings
 from app.dashboard import render_tickets_csv, render_tickets_page
 from app.db import init_db
@@ -36,6 +39,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Ticketing LINE Bot", lifespan=lifespan)
+
+_static_dir = Path(__file__).resolve().parent.parent / "static"
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+app.include_router(bills_router)
 
 
 @app.get("/health")

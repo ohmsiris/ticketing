@@ -242,3 +242,44 @@ def due_soon_digest(tickets: list[dict]) -> str:
             f"{_snippet(_display_text(t))} (ครบกำหนด {t['due_date']}, อีก {t['remind_days_before']} วัน)"
         )
     return "\n".join(lines)
+
+
+# --- Bill tracking ---
+
+
+def bill_processing_ack() -> str:
+    """Sent as an immediate reply in a PRIVATE chat only (never into a
+    group -- see webhook_handler.py) right when a photo/PDF arrives,
+    since extraction takes several seconds and silence would be
+    confusing."""
+    return "📷 กำลังอ่านบิล รอสักครู่นะครับ"
+
+
+def bill_ready_for_review(bill: dict, review_url: str, note: str | None = None) -> str:
+    vehicle_bits = [b for b in (bill.get("vehicle_license"), bill.get("vehicle_number")) if b]
+    vehicle_label = " / ".join(vehicle_bits) if vehicle_bits else "(ไม่ทราบทะเบียน)"
+    lines = [
+        "✅ บิลใหม่พร้อมตรวจสอบ",
+        f"ร้าน: {bill.get('shop_name') or '(ไม่ทราบ)'}",
+        f"รถ: {vehicle_label}",
+        f"ยอดรวม: {bill.get('total_cost') or 0} บาท",
+    ]
+    if note:
+        lines.append(f"⚠️ {note}")
+    lines.append(f"ตรวจสอบที่: {review_url}")
+    return "\n".join(lines)
+
+
+def bill_totals_mismatch_note(combined_sum: float, final_total: float) -> str:
+    return (
+        f"ยอดรวมของหลายหน้าบวกกันได้ {combined_sum:g} แต่หน้าสุดท้ายเขียนว่า {final_total:g} "
+        f"— อาจมีตัวเลขอ่านผิดสักรายการ ลองเช็คอีกครั้ง"
+    )
+
+
+def bill_unsupported_file() -> str:
+    return "รองรับเฉพาะรูปถ่ายบิล หรือไฟล์ PDF นะครับ ไฟล์นี้ยังไม่รองรับ"
+
+
+def bill_extraction_failed() -> str:
+    return "อ่านบิลนี้ไม่สำเร็จ ลองส่งใหม่อีกครั้ง หรือถ่ายรูปให้ชัดขึ้นนะครับ"

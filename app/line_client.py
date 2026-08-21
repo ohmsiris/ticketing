@@ -24,6 +24,9 @@ logger = logging.getLogger("ticketing.line")
 
 REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 PUSH_URL = "https://api.line.me/v2/bot/message/push"
+# Note: content lives on api-data.line.me, a different host than the rest
+# of the Messaging API (api.line.me) -- easy typo to make.
+CONTENT_URL_TEMPLATE = "https://api-data.line.me/v2/bot/message/{message_id}/content"
 
 
 def verify_signature(body: bytes, signature: str) -> bool:
@@ -85,6 +88,17 @@ def push_message(user_id: str, texts: list[str]) -> None:
         return
     payload = {"to": user_id, "messages": _as_messages(texts)}
     _post(PUSH_URL, payload)
+
+
+def download_message_content(message_id: str) -> bytes:
+    """Downloads the actual bytes for an image/file message. The webhook
+    event only ever gives you a message_id -- the real content lives
+    behind this separate authenticated endpoint, not in the event
+    payload itself."""
+    url = CONTENT_URL_TEMPLATE.format(message_id=message_id)
+    resp = httpx.get(url, headers=_headers(), timeout=30)
+    resp.raise_for_status()
+    return resp.content
 
 
 def _post(url: str, payload: dict) -> None:

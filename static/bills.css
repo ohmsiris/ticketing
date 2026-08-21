@@ -1,0 +1,209 @@
+:root {
+    --bg: #f7f7f5;
+    --card: #ffffff;
+    --border: #e2e0da;
+    --text: #2b2a27;
+    --muted: #7a766d;
+    --accent: #c1481d;
+    --accent-soft: #f4e4dc;
+    --pending: #b8860b;
+    --pending-bg: #fbf1d8;
+    --verified: #2e7d4f;
+    --verified-bg: #e2f3e8;
+    --flag: #a13d17;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Tahoma", "Sarabun", sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+.page {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+}
+
+h1 {
+    font-size: 24px;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+h2 {
+    font-size: 16px;
+    margin: 28px 0 12px;
+    color: var(--accent);
+}
+
+.subtitle {
+    color: var(--muted);
+    margin-top: 0;
+    margin-bottom: 20px;
+}
+
+.back-link {
+    display: inline-block;
+    margin-bottom: 16px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 14px;
+}
+.back-link:hover { text-decoration: underline; }
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+th, td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+th {
+    background: #efece4;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+tr:last-child td { border-bottom: none; }
+
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.empty-note {
+    text-align: center;
+    color: var(--muted);
+    padding: 24px 12px;
+}
+
+.badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.badge-pending_review { color: var(--pending); background: var(--pending-bg); }
+.badge-verified { color: var(--verified); background: var(--verified-bg); }
+
+.button {
+    display: inline-block;
+    padding: 6px 14px;
+    background: var(--accent);
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.button:hover { opacity: 0.9; }
+
+.field-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px;
+}
+
+label {
+    display: flex;
+    flex-direction: column;
+    font-size: 13px;
+    color: var(--muted);
+    gap: 4px;
+}
+
+label.flag-field { color: var(--flag); font-weight: 600; }
+
+input, select {
+    font: inherit;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: white;
+    color: var(--text);
+}
+
+input:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+input.narrow { width: 100%; min-width: 70px; }
+
+th.flag-field, td input[name^="description_"] {
+    border-left: 3px solid var(--flag);
+}
+
+.row-remove {
+    font: inherit;
+    font-size: 12px;
+    padding: 5px 10px;
+    background: transparent;
+    color: var(--flag);
+    border: 1px solid var(--flag);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.row-remove:hover { background: var(--accent-soft); }
+
+.add-row-wrap {
+    margin-top: 10px;
+}
+
+.secondary-button {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 14px;
+    background: white;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.secondary-button:hover { background: var(--accent-soft); }
+
+.submit-row {
+    margin-top: 20px;
+    text-align: right;
+}
+
+button[type="submit"] {
+    font: inherit;
+    font-weight: 700;
+    padding: 10px 22px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+button[type="submit"]:hover { opacity: 0.9; }
+
+.verified-note {
+    color: var(--verified);
+    font-size: 13px;
+    margin-top: 14px;
+}
