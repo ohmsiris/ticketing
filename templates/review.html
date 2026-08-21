@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>ตรวจสอบ {{ bill.bill_id }}</title>
+    <link rel="stylesheet" href="/static/bills.css">
+</head>
+<body>
+    <div class="page">
+        <a class="back-link" href="/bills?token={{ token }}">&larr; กลับไปหน้ารายการบิล</a>
+        <h1>{{ bill.bill_id }}
+            <span class="badge badge-{{ bill.status }}">
+                {{ "ยืนยันแล้ว" if bill.status == "verified" else "รอตรวจสอบ" }}
+            </span>
+        </h1>
+        <p class="subtitle">อ่านจาก: {{ bill.source_photos }}</p>
+
+        <form method="POST" action="/bills/{{ bill.bill_id }}?token={{ token }}" id="review-form">
+            <input type="hidden" name="row_ids" id="row_ids">
+
+            <h2>รายละเอียดบิล</h2>
+            <div class="field-grid">
+                <label>ชื่อร้าน
+                    <input type="text" name="shop_name" value="{{ bill.shop_name or '' }}">
+                </label>
+                <label>วันที่
+                    <input type="text" name="date" value="{{ bill.date or '' }}">
+                </label>
+                <label>สาขา
+                    <input type="text" name="branch" value="{{ bill.branch or '' }}">
+                </label>
+                <label class="flag-field">ทะเบียนรถ (ตรวจสอบอีกครั้ง)
+                    <input type="text" name="vehicle_license" value="{{ bill.vehicle_license or '' }}">
+                </label>
+                <label>เบอร์รถ
+                    <input type="text" name="vehicle_number" value="{{ bill.vehicle_number or '' }}">
+                </label>
+                <label>เลขไมล์
+                    <input type="text" name="mileage" value="{{ bill.mileage or '' }}">
+                </label>
+                <label>เลขไมล์ครั้งต่อไป
+                    <input type="text" name="next_service_mileage" value="{{ bill.next_service_mileage or '' }}">
+                </label>
+                <label>ยอดรวม
+                    <input type="text" name="total_cost" value="{{ bill.total_cost }}">
+                </label>
+            </div>
+
+            <h2>รายการซ่อม</h2>
+            <table id="line-items-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th class="flag-field">รายละเอียด (ตรวจสอบอีกครั้ง)</th>
+                        <th>หมวดหมู่</th>
+                        <th>จำนวน</th>
+                        <th>หน่วย</th>
+                        <th>ราคาต่อหน่วย</th>
+                        <th>ราคารวม</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="line-items-body">
+                    {% for item in bill.line_items %}
+                    <tr data-row-id="{{ item.id }}">
+                        <td class="row-number"></td>
+                        <td><input type="text" name="description_{{ item.id }}" value="{{ item.description or '' }}"></td>
+                        <td>
+                            <select name="category_{{ item.id }}">
+                                {% for cat in categories %}
+                                <option value="{{ cat }}" {% if cat == item.category %}selected{% endif %}>{{ cat }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td><input type="text" class="narrow" name="quantity_{{ item.id }}" value="{{ item.quantity or '' }}"></td>
+                        <td><input type="text" class="narrow" name="unit_{{ item.id }}" value="{{ item.unit or '' }}"></td>
+                        <td><input type="text" class="narrow" name="unit_price_{{ item.id }}" value="{{ item.unit_price or '' }}"></td>
+                        <td><input type="text" class="narrow" name="cost_{{ item.id }}" value="{{ item.cost or '' }}"></td>
+                        <td><button type="button" class="row-remove" onclick="removeRow('{{ item.id }}')">ลบ</button></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div class="add-row-wrap">
+                <button type="button" class="secondary-button" onclick="addRow()">+ เพิ่มรายการ</button>
+            </div>
+
+            <div class="submit-row">
+                <button type="submit">ยืนยันและบันทึก</button>
+            </div>
+        </form>
+
+        {% if bill.status == "verified" %}
+        <p class="verified-note">ยืนยันเมื่อ {{ bill.verified_at }} โดย {{ bill.verified_by }}</p>
+        {% endif %}
+    </div>
+
+    <script>
+        const CATEGORIES = {{ categories | tojson }};
+        // New rows use a "new"-prefixed id, never a plain number -- real
+        // rows are keyed by their SQLite id (a global autoincrement, not
+        // reset per bill), so a plain numeric counter here could someday
+        // collide with a real one.
+        let newRowCounter = 1;
+
+        function categoryOptions(selectedValue) {
+            return CATEGORIES.map(function (cat) {
+                const selected = cat === selectedValue ? " selected" : "";
+                return `<option value="${cat}"${selected}>${cat}</option>`;
+            }).join("");
+        }
+
+        function addRow() {
+            const rowId = "new" + (newRowCounter++);
+            const tbody = document.getElementById("line-items-body");
+            const tr = document.createElement("tr");
+            tr.dataset.rowId = rowId;
+            tr.innerHTML = `
+                <td class="row-number"></td>
+                <td><input type="text" name="description_${rowId}" value=""></td>
+                <td><select name="category_${rowId}">${categoryOptions("")}</select></td>
+                <td><input type="text" class="narrow" name="quantity_${rowId}" value=""></td>
+                <td><input type="text" class="narrow" name="unit_${rowId}" value=""></td>
+                <td><input type="text" class="narrow" name="unit_price_${rowId}" value=""></td>
+                <td><input type="text" class="narrow" name="cost_${rowId}" value=""></td>
+                <td><button type="button" class="row-remove" onclick="removeRow('${rowId}')">ลบ</button></td>
+            `;
+            tbody.appendChild(tr);
+            refreshRowState();
+            tr.querySelector("input").focus();
+        }
+
+        function removeRow(rowId) {
+            const tr = document.querySelector(`tr[data-row-id="${rowId}"]`);
+            if (tr) tr.remove();
+            refreshRowState();
+        }
+
+        function refreshRowState() {
+            const rows = document.querySelectorAll("#line-items-body tr");
+            const ids = [];
+            rows.forEach(function (tr, index) {
+                tr.querySelector(".row-number").textContent = index + 1;
+                ids.push(tr.dataset.rowId);
+            });
+            document.getElementById("row_ids").value = ids.join(",");
+        }
+
+        refreshRowState();
+    </script>
+</body>
+</html>

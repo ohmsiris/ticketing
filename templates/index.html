@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>ระบบบิลซ่อมบำรุงรถ</title>
+    <link rel="stylesheet" href="/static/bills.css">
+</head>
+<body>
+    <div class="page">
+        <h1>บิลซ่อมบำรุงรถ</h1>
+        <p class="subtitle">รายการบิลที่ระบบอ่านแล้ว — คลิกที่บิลเพื่อตรวจสอบและยืนยัน</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>รหัสบิล</th>
+                    <th>ร้าน</th>
+                    <th>วันที่</th>
+                    <th>รถ</th>
+                    <th>ยอดรวม</th>
+                    <th>สถานะ</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for bill in bills %}
+                <tr>
+                    <td>{{ bill.bill_id }}</td>
+                    <td>{{ bill.shop_name }}</td>
+                    <td>{{ bill.date }}</td>
+                    <td>{{ bill.vehicle_license }}{% if bill.vehicle_number %} (เบอร์ {{ bill.vehicle_number }}){% endif %}</td>
+                    <td class="num">{{ bill.total_cost }}</td>
+                    <td>
+                        <span class="badge badge-{{ bill.status }}">
+                            {{ "ยืนยันแล้ว" if bill.status == "verified" else "รอตรวจสอบ" }}
+                        </span>
+                    </td>
+                    <td><a class="button" href="/bills/{{ bill.bill_id }}?token={{ token }}">
+                        {{ "ดู" if bill.status == "verified" else "ตรวจสอบ" }}
+                    </a></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="empty-note">ยังไม่มีบิลเข้ามาในระบบ</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

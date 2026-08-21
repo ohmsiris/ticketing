@@ -32,6 +32,12 @@ class Settings:
     db_path: str
     port: int
     dashboard_token: str
+    # -- bill tracking --
+    google_service_account_json: str  # full JSON key content, not a file path
+    bills_sheet_id: str
+    line_items_sheet_id: str
+    review_token: str
+    public_base_url: str  # e.g. https://ticketing-production-xxxx.up.railway.app (no trailing slash)
 
 
 def _load() -> Settings:
@@ -44,6 +50,11 @@ def _load() -> Settings:
         db_path=os.environ.get("DB_PATH", "data/tickets.db"),
         port=int(os.environ.get("PORT", "8000")),
         dashboard_token=os.environ.get("DASHBOARD_TOKEN", ""),
+        google_service_account_json=os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", ""),
+        bills_sheet_id=os.environ.get("BILLS_SHEET_ID", ""),
+        line_items_sheet_id=os.environ.get("LINE_ITEMS_SHEET_ID", ""),
+        review_token=os.environ.get("REVIEW_TOKEN", ""),
+        public_base_url=os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"),
     )
 
 

@@ -36,6 +36,49 @@ CREATE TABLE IF NOT EXISTS user_state (
     reporter     TEXT PRIMARY KEY CHECK (reporter IN ('ohm', 'mom')),
     ticket_count INTEGER NOT NULL DEFAULT 0
 );
+
+-- Bill tracking (separate concern from tickets -- a photographed repair
+-- bill or an internal mechanic's PM log, not a text-message report).
+-- Text-ish numeric fields (mileage, total_cost, quantity, unit_price, cost)
+-- are stored as TEXT on purpose: mileage can legitimately be the word
+-- "ไมล์เสีย" instead of a number, and this mirrors how the OCR pipeline
+-- already treats these fields (see the OCR project's bill_extractor.py).
+CREATE TABLE IF NOT EXISTS bills (
+    bill_id              TEXT PRIMARY KEY,       -- e.g. 'B-20260817-7K3M'
+    status                TEXT NOT NULL DEFAULT 'pending_review'
+                              CHECK (status IN ('pending_review', 'verified')),
+    source_type           TEXT NOT NULL DEFAULT 'external_bill'
+                              CHECK (source_type IN ('external_bill', 'internal_pm')),
+    reporter              TEXT NOT NULL CHECK (reporter IN ('ohm', 'mom')),  -- who sent it in, not necessarily who verifies it
+    shop_name             TEXT,
+    date                  TEXT,
+    branch                TEXT,
+    vehicle_license       TEXT,
+    vehicle_number        TEXT,
+    mileage               TEXT,
+    next_service_mileage  TEXT,
+    total_cost            TEXT,
+    source_photos         TEXT,        -- comma-separated LINE message ids, for traceability
+    continues_next_page   INTEGER NOT NULL DEFAULT 0,  -- 1 = still an open chain awaiting its next page
+    created_at            TEXT NOT NULL,
+    verified_at           TEXT,
+    verified_by           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS bill_line_items (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    bill_id            TEXT NOT NULL REFERENCES bills(bill_id) ON DELETE CASCADE,
+    line_item_number   INTEGER NOT NULL,
+    description        TEXT,
+    category           TEXT,
+    quantity           TEXT,
+    unit               TEXT,
+    unit_price         TEXT,
+    cost               TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_bills_reporter_status ON bills (reporter, status);
+CREATE INDEX IF NOT EXISTS idx_bill_line_items_bill_id ON bill_line_items (bill_id);
 """
 
 

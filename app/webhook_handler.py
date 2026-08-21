@@ -6,10 +6,11 @@ on its own.
 """
 import logging
 
-from app import strings, tickets
+from app import bills, strings, tickets
+from app.bill_extraction import extract_bill
 from app.classifier import classify
 from app.config import settings
-from app.line_client import QuickReplyOption, reply_message
+from app.line_client import QuickReplyOption, download_message_content, push_message, reply_message
 
 logger = logging.getLogger("ticketing.webhook")
 
@@ -48,6 +49,10 @@ def handle_follow_event(event: dict) -> None:
 def handle_message_event(event: dict) -> None:
     source = event.get("source", {})
     line_user_id = source.get("userId")
+    # "group" (LINE group chat) or "room" (multi-person room) vs "user"
+    # (a private 1-on-1 chat with the bot) -- this is what lets bill
+    # notifications stay OUT of groups entirely, see _handle_bill_message.
+    is_group = source.get("type") in ("group", "room")
     reply_token = event.get("replyToken")
     message = event.get("message", {})
     message_type = message.get("type")
@@ -59,12 +64,16 @@ def handle_message_event(event: dict) -> None:
         logger.info("message from unknown LINE userId=%s -- ignoring. %s", line_user_id, message)
         return
 
+    if message_type in ("image", "file"):
+        _handle_bill_message(reporter, message, is_group, reply_token)
+        return
+
     if message_type == "audio":
         reply_message(reply_token, [strings.voice_not_supported()])
         return
 
     if message_type != "text":
-        logger.info("ignoring non-text, non-audio message type=%s from %s", message_type, reporter)
+        logger.info("ignoring non-text, non-audio/image/file message type=%s from %s", message_type, reporter)
         return
 
     text = message.get("text", "")
@@ -294,6 +303,68 @@ def _handle_cancel_ticket(
         QuickReplyOption(label=_ticket_picker_label(t), text=f"ยกเลิก #{t['id']}") for t in open_tickets_for_reporter
     ]
     reply_message(reply_token, [strings.cancel_ticket_picker_prompt()], quick_reply=quick_reply)
+
+
+def _handle_bill_message(reporter: str, message: dict, is_group: bool, reply_token: str) -> None:
+    """
+    Handles a photographed bill or PDF. Deliberately NEVER replies into a
+    group/room (is_group) -- whatever happens, the confirmation always
+    goes as a PRIVATE push to the manager (OHM_LINE_USER_ID), regardless
+    of who sent the photo or where. In a private chat, a quick "reading
+    it now" ack is sent too since extraction takes a few seconds.
+
+    Multi-page bills: LINE delivers a multi-select gallery send as
+    consecutive events from the same sender, so bills.find_open_chain
+    picks up right where the last photo left off. See bills.py for the
+    actual chain/merge logic.
+    """
+    message_id = message.get("id")
+    message_type = message.get("type")
+
+    if message_type == "file":
+        file_name = (message.get("fileName") or "").lower()
+        if not file_name.endswith(".pdf"):
+            if not is_group:
+                reply_message(reply_token, [strings.bill_unsupported_file()])
+            else:
+                logger.info("ignoring non-PDF file %r from %s in a group", file_name, reporter)
+            return
+        media_type = "application/pdf"
+    else:
+        media_type = "image/jpeg"  # LINE always serves downloaded images as JPEG regardless of original format
+
+    if not is_group:
+        reply_message(reply_token, [strings.bill_processing_ack()])
+
+    try:
+        file_bytes = download_message_content(message_id)
+        extracted = extract_bill(file_bytes, media_type)
+    except Exception:
+        logger.exception("bill extraction failed for message_id=%s from %s", message_id, reporter)
+        if not is_group:
+            reply_message(reply_token, [strings.bill_extraction_failed()])
+        return
+
+    note = None
+    open_chain = bills.find_open_chain(reporter)
+    if open_chain is not None:
+        result = bills.append_page_to_chain(open_chain["bill_id"], extracted, message_id)
+        bill = result["bill"]
+        if not result["totals_reconciled"]:
+            note = strings.bill_totals_mismatch_note(result["combined_sum"], result["final_total"])
+    else:
+        bill_id = bills.create_bill(reporter, "external_bill", extracted, message_id)
+        bill = bills.get_bill(bill_id)
+
+    if bill.get("continues_next_page"):
+        # Still an open chain awaiting its next page -- don't notify yet,
+        # the next photo (or the 30-minute staleness window) decides
+        # what happens next. See bills.find_open_chain.
+        logger.info("bill %s still awaiting next page from %s", bill["bill_id"], reporter)
+        return
+
+    review_url = f"{settings.public_base_url}/bills/{bill['bill_id']}?token={settings.review_token}"
+    push_message(settings.ohm_line_user_id, [strings.bill_ready_for_review(bill, review_url, note)])
 
 
 def _ticket_picker_label(ticket: dict) -> str:
