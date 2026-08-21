@@ -201,6 +201,38 @@ th.flag-field, td input[name^="description_"] {
 }
 .secondary-button:hover { background: var(--accent-soft); }
 
+.total-row {
+    margin-top: 20px;
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+
+.total-row label {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.total-input {
+    width: 140px;
+    text-align: right;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.total-hint {
+    color: var(--muted);
+    font-size: 12px;
+    flex-basis: 100%;
+    text-align: right;
+}
+
 .submit-row {
     margin-top: 20px;
     text-align: right;
