@@ -80,6 +80,7 @@ def sync_verified_bill(bill: dict) -> bool:
     try:
         append_bill(bill)
         append_line_items(bill["bill_id"], bill.get("line_items") or [])
+        logger.info("synced bill %s to Google Sheets OK", bill.get("bill_id"))
         return True
     except Exception:
         logger.exception("failed to sync bill %s to Google Sheets", bill.get("bill_id"))

@@ -320,6 +320,10 @@ def _handle_bill_message(reporter: str, message: dict, is_group: bool, reply_tok
     """
     message_id = message.get("id")
     message_type = message.get("type")
+    logger.info(
+        "bill message received: type=%s from=%s group=%s message_id=%s",
+        message_type, reporter, is_group, message_id,
+    )
 
     if message_type == "file":
         file_name = (message.get("fileName") or "").lower()
@@ -345,16 +349,28 @@ def _handle_bill_message(reporter: str, message: dict, is_group: bool, reply_tok
             reply_message(reply_token, [strings.bill_extraction_failed()])
         return
 
+    logger.info(
+        "extracted OK: shop=%r total=%r items=%d continues_next_page=%s",
+        extracted.get("shop_name"), extracted.get("total_cost"),
+        len(extracted.get("line_items") or []), extracted.get("continues_next_page"),
+    )
+
     note = None
     open_chain = bills.find_open_chain(reporter)
     if open_chain is not None:
+        logger.info("merging into open chain %s", open_chain["bill_id"])
         result = bills.append_page_to_chain(open_chain["bill_id"], extracted, message_id)
         bill = result["bill"]
         if not result["totals_reconciled"]:
             note = strings.bill_totals_mismatch_note(result["combined_sum"], result["final_total"])
+            logger.warning(
+                "bill %s totals mismatch: combined=%s final=%s",
+                bill["bill_id"], result["combined_sum"], result["final_total"],
+            )
     else:
         bill_id = bills.create_bill(reporter, "external_bill", extracted, message_id)
         bill = bills.get_bill(bill_id)
+        logger.info("created new bill %s from %s", bill_id, reporter)
 
     if bill.get("continues_next_page"):
         # Still an open chain awaiting its next page -- don't notify yet,
@@ -364,6 +380,7 @@ def _handle_bill_message(reporter: str, message: dict, is_group: bool, reply_tok
         return
 
     review_url = f"{settings.public_base_url}/bills/{bill['bill_id']}?token={settings.review_token}"
+    logger.info("bill %s ready for review, notifying manager: %s", bill["bill_id"], review_url)
     push_message(settings.ohm_line_user_id, [strings.bill_ready_for_review(bill, review_url, note)])
 
 
