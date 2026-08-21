@@ -239,6 +239,32 @@ def get_all_tickets() -> list[dict]:
         conn.close()
 
 
+def get_all_open_tickets_by_due_date() -> list[dict]:
+    """
+    Every currently open ticket (across both reporters), soonest due date
+    first, then no-due-date ones last, newest-created within each group --
+    same ordering convention as get_all_tickets(). Powers the "งานทั้งหมด"
+    on-demand command (see webhook_handler.py), which is about what's due
+    and when, not how long something's been sitting open (that's what
+    get_open_tickets()/"open tickets" is for).
+    """
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM tickets
+            WHERE status = 'open'
+            ORDER BY
+                CASE WHEN due_date IS NULL THEN 1 ELSE 0 END,
+                due_date ASC,
+                created_at DESC
+            """
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def get_open_tickets(min_age_hours: float = 0) -> list[dict]:
     """
     Open tickets, oldest first, each annotated with hours_open. Used both by

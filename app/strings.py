@@ -197,6 +197,22 @@ def open_tickets_digest(tickets: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def all_open_tickets_digest(tickets: list[dict]) -> str:
+    """tickets: list of dicts with id, reporter, department, message, summary,
+    due_date -- every currently open ticket, soonest due date first (see
+    get_all_open_tickets_by_due_date). Powers the "งานทั้งหมด" command."""
+    if not tickets:
+        return "ไม่มีงานค้างอยู่ตอนนี้ครับ"
+    lines = [f"📋 งานทั้งหมด {len(tickets)} รายการ:"]
+    for t in tickets:
+        due = f"กำหนด: {t['due_date']}" if t["due_date"] else "ไม่มีกำหนด"
+        lines.append(
+            f"#{t['id']} [{_reporter_label(t['reporter'])}/{t['department']}] "
+            f"{_snippet(_display_text(t))} ({due})"
+        )
+    return "\n".join(lines)
+
+
 def due_today_digest(tickets: list[dict]) -> str:
     """tickets: list of dicts with id, reporter, department, message, summary."""
     lines = [f"📅 งานที่ครบกำหนดวันนี้ {len(tickets)} รายการ:"]

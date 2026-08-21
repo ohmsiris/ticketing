@@ -69,11 +69,18 @@ def handle_message_event(event: dict) -> None:
 
     text = message.get("text", "")
 
-    # On-demand digest command, Ohm only. Checked before we bother calling
-    # Claude, since it's an exact command, not natural-language content.
-    if reporter == "ohm" and text.strip().lower() == "open tickets":
+    # On-demand digest commands, Ohm only. Checked before we bother calling
+    # Claude, since these are exact commands, not natural-language content.
+    # "open tickets": how long each has been sitting open. "งานทั้งหมด":
+    # everything open right now sorted by due date -- different angle on
+    # the same underlying open tickets, not a duplicate of the other.
+    stripped = text.strip()
+    if reporter == "ohm" and stripped.lower() == "open tickets":
         open_tickets = tickets.get_open_tickets(min_age_hours=0)
         reply_message(reply_token, [strings.open_tickets_digest(open_tickets)])
+        return
+    if reporter == "ohm" and stripped == "งานทั้งหมด":
+        reply_message(reply_token, [strings.all_open_tickets_digest(tickets.get_all_open_tickets_by_due_date())])
         return
 
     # Fetched once and reused for two things: (a) tells the classifier when
