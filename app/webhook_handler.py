@@ -347,6 +347,14 @@ def _handle_bill_message(reporter: str, message: dict, is_group: bool, reply_tok
         logger.exception("bill extraction failed for message_id=%s from %s", message_id, reporter)
         if not is_group:
             reply_message(reply_token, [strings.bill_extraction_failed()])
+        # Always tell the manager privately too, even from a group where we
+        # otherwise stay silent -- a failure should never be invisible to
+        # everyone, only successes are meant to route exclusively through
+        # the manager's private chat.
+        push_message(
+            settings.ohm_line_user_id,
+            [f"⚠️ อ่านบิลไม่สำเร็จ (จาก {reporter}, message_id={message_id}) เช็ค log ดูนะครับ"],
+        )
         return
 
     logger.info(
