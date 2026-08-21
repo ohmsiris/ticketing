@@ -352,6 +352,8 @@ def _load_vehicle_roster_text() -> str:
         bits = [f"branch={r.get('branch','')}", f"truck#={r.get('truck_number','')}", f"plate={r.get('plate','')}"]
         if r.get("province"):
             bits.append(f"province={r['province']}")
+        if r.get("vehicle_type"):
+            bits.append(r["vehicle_type"])  # e.g. รถใหญ่ (big truck) / รถเล็ก (pickup)
         make_model = f"{r.get('make','')} {r.get('model','')}".strip()
         if make_model:
             bits.append(make_model)

@@ -38,6 +38,9 @@ class Settings:
     line_items_sheet_id: str
     review_token: str
     public_base_url: str  # e.g. https://ticketing-production-xxxx.up.railway.app (no trailing slash)
+    # -- vehicle roster auto-refresh (see app/roster_sync.py) --
+    drivers_sheet_id: str  # the "Drivers" Google Sheet's id, from its URL
+    drivers_roster_worksheet: str  # tab name holding the roster tables; blank = first tab
 
 
 def _load() -> Settings:
@@ -55,6 +58,8 @@ def _load() -> Settings:
         line_items_sheet_id=os.environ.get("LINE_ITEMS_SHEET_ID", ""),
         review_token=os.environ.get("REVIEW_TOKEN", ""),
         public_base_url=os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"),
+        drivers_sheet_id=os.environ.get("DRIVERS_SHEET_ID", ""),
+        drivers_roster_worksheet=os.environ.get("DRIVERS_ROSTER_WORKSHEET", ""),
     )
 
 

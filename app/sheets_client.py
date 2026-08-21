@@ -40,13 +40,22 @@ LINE_ITEMS_HEADER = [
 _client: Optional[gspread.Client] = None
 
 
-def _client_lazy() -> gspread.Client:
+def get_client() -> gspread.Client:
+    """The shared authorized gspread client (lazy singleton). Public so
+    other modules that need to read a *different* sheet with the same
+    service account -- e.g. app/roster_sync.py reading the Drivers sheet
+    -- don't each load and authorize their own copy of the credentials."""
     global _client
     if _client is None:
         info = json.loads(settings.google_service_account_json)
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
         _client = gspread.authorize(creds)
     return _client
+
+
+# Old private name, kept as an alias in case anything else in this file
+# still calls it below.
+_client_lazy = get_client
 
 
 def _ensure_header(sheet, expected_header: list[str]) -> None:
