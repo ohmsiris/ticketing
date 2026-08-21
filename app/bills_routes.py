@@ -29,8 +29,8 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
 
 BILL_FORM_FIELDS = (
-    "shop_name", "date", "branch", "vehicle_license", "vehicle_number",
-    "mileage", "next_service_mileage", "total_cost",
+    "shop_name", "date", "branch", "vehicle_license", "vehicle_license_province",
+    "vehicle_number", "mileage", "next_service_mileage", "total_cost",
 )
 
 

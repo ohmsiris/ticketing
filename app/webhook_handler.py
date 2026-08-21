@@ -387,6 +387,14 @@ def _handle_bill_message(reporter: str, message: dict, is_group: bool, reply_tok
         logger.info("bill %s still awaiting next page from %s", bill["bill_id"], reporter)
         return
 
+    # Fold in the deterministic roster-match warning (e.g. "vehicle number
+    # not found") from bill_extraction.py alongside any totals-mismatch
+    # note, so the manager sees everything worth double-checking in one
+    # message rather than only in the review page.
+    vehicle_warning = (bill.get("vehicle_match_warning") or "").strip()
+    if vehicle_warning:
+        note = f"{note}; {vehicle_warning}" if note else vehicle_warning
+
     review_url = f"{settings.public_base_url}/bills/{bill['bill_id']}?token={settings.review_token}"
     logger.info("bill %s ready for review, notifying manager: %s", bill["bill_id"], review_url)
     push_message(settings.ohm_line_user_id, [strings.bill_ready_for_review(bill, review_url, note)])

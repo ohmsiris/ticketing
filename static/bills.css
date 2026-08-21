@@ -50,6 +50,16 @@ h2 {
     margin-bottom: 20px;
 }
 
+.warning-banner {
+    background: var(--pending-bg);
+    color: var(--pending);
+    border: 1px solid var(--pending);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-weight: 600;
+    margin-bottom: 20px;
+}
+
 .back-link {
     display: inline-block;
     margin-bottom: 16px;
