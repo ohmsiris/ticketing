@@ -50,9 +50,6 @@
                 <label>เลขไมล์ครั้งต่อไป
                     <input type="text" name="next_service_mileage" value="{{ bill.next_service_mileage or '' }}">
                 </label>
-                <label>ยอดรวม
-                    <input type="text" name="total_cost" value="{{ bill.total_cost }}">
-                </label>
             </div>
 
             <h2>รายการซ่อม</h2>
@@ -92,6 +89,13 @@
             </table>
             <div class="add-row-wrap">
                 <button type="button" class="secondary-button" onclick="addRow()">+ เพิ่มรายการ</button>
+            </div>
+
+            <div class="total-row">
+                <label>ยอดรวม
+                    <input type="text" name="total_cost" id="total_cost" class="total-input" value="{{ bill.total_cost }}">
+                </label>
+                <span class="total-hint">คำนวณอัตโนมัติจากราคารวมแต่ละรายการด้านบน -- แก้เองได้ถ้ายอดจริงต่างจากนี้ (เช่น มี VAT/ส่วนลด)</span>
             </div>
 
             <div class="submit-row">
@@ -182,6 +186,7 @@
             `;
             tbody.appendChild(tr);
             refreshRowState();
+            recalcTotal();
             tr.querySelector("input").focus();
         }
 
@@ -189,6 +194,25 @@
             const tr = document.querySelector(`tr[data-row-id="${rowId}"]`);
             if (tr) tr.remove();
             refreshRowState();
+            recalcTotal();
+        }
+
+        // Sums every line item's ราคารวม (cost_*) field into ยอดรวม, live,
+        // as the manager edits any of them -- they can still type over the
+        // result by hand afterward (e.g. the real total includes VAT or a
+        // discount not itemized as its own line), it just gets recalculated
+        // again the next time a line item's cost actually changes.
+        function recalcTotal() {
+            const costInputs = document.querySelectorAll('#line-items-body input[name^="cost_"]');
+            let sum = 0;
+            costInputs.forEach(function (input) {
+                const value = parseFloat(input.value);
+                if (!isNaN(value)) sum += value;
+            });
+            // Whole numbers stay whole (matches how these bills' totals are
+            // normally written); otherwise keep up to 2 decimal places.
+            const totalInput = document.getElementById("total_cost");
+            totalInput.value = Number.isInteger(sum) ? String(sum) : sum.toFixed(2);
         }
 
         function refreshRowState() {
@@ -203,6 +227,11 @@
 
         refreshRowState();
         document.getElementById("vehicle_license").addEventListener("input", onVehicleLicenseInput);
+        // Delegated on the tbody (not each input directly) so rows added
+        // later via addRow() are covered without re-binding anything.
+        document.getElementById("line-items-body").addEventListener("input", function (e) {
+            if (e.target.name && e.target.name.startsWith("cost_")) recalcTotal();
+        });
     </script>
 </body>
 </html>
