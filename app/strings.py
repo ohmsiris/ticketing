@@ -262,6 +262,7 @@ def bill_ready_for_review(bill: dict, review_url: str, note: str | None = None) 
         "✅ บิลใหม่พร้อมตรวจสอบ",
         f"ร้าน: {bill.get('shop_name') or '(ไม่ทราบ)'}",
         f"รถ: {vehicle_label}",
+        f"สาขา: {bill.get('branch') or '(ไม่ทราบ)'}",
         f"ยอดรวม: {bill.get('total_cost') or 0} บาท",
     ]
     if note:
