@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app import bills, roster_sync, sheets_client
-from app.bill_extraction import CATEGORIES
+from app.bill_extraction import CATEGORIES, get_roster_rows
 from app.config import settings
 
 logger = logging.getLogger("ticketing.bills_routes")
@@ -62,7 +62,9 @@ def bill_review(request: Request, bill_id: str, token: str = ""):
     if bill is None:
         return HTMLResponse("ไม่พบบิลนี้", status_code=404)
     return templates.TemplateResponse(
-        request, "review.html", {"bill": bill, "categories": CATEGORIES, "token": token}
+        request,
+        "review.html",
+        {"bill": bill, "categories": CATEGORIES, "token": token, "roster": get_roster_rows()},
     )
 
 

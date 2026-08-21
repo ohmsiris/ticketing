@@ -146,6 +146,12 @@ label {
 
 label.flag-field { color: var(--flag); font-weight: 600; }
 
+.match-hint {
+    color: var(--verified);
+    font-size: 12px;
+    font-weight: 600;
+}
+
 input, select {
     font: inherit;
     padding: 7px 9px;

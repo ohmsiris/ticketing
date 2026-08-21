@@ -102,18 +102,23 @@ EXTRACTION_SCHEMA = {
                 "vehicle_license='1ฒย 4267' and vehicle_license_province="
                 "'กทม'). This is NOT always near the top of the bill -- "
                 "look over the WHOLE page, since it's sometimes written in "
-                "the middle of the page instead. A reference list of a FEW "
-                "known vehicles may be provided below, but it is heavily "
-                "incomplete -- most real, legitimate plates will NOT be on "
-                "it, even ones from the same branch. Only use that list as "
-                "a tie-breaker when the handwriting is genuinely ambiguous "
-                "between two similar-looking characters (e.g. it could be a "
-                "4 or could be an 8) AND one reading matches the list. Do "
-                "NOT change a clearly-written plate to match the list just "
-                "because it's close -- transcribe exactly what's actually "
-                "written by default, since the true vehicle very likely "
-                "just isn't on this short partial list. Empty string if no "
-                "plate is present or legible at all."
+                "the middle of the page instead. A reference list of the "
+                "known fleet may be provided below -- this is a small, "
+                "mostly closed fleet (around 50-70 vehicles total across "
+                "both branches), so a plate that doesn't appear on it is "
+                "the unusual case, not the norm, and is more often a "
+                "misread digit than a genuinely new vehicle. If your first "
+                "reading doesn't match anything on the list, look again "
+                "character by character before finalizing -- check "
+                "specifically for commonly confused digits (4/9, 3/8, 1/7, "
+                "0/6) -- and only keep a no-match reading if you're still "
+                "confident after that second look. That said, never force "
+                "a clearly-legible plate to match the list just because "
+                "it's close if you're genuinely confident in what's "
+                "written -- the fleet does occasionally add new vehicles "
+                "or use a rented/dealership loaner truck, so a real "
+                "no-match is still possible. Empty string if no plate is "
+                "present or legible at all."
             ),
         },
         "vehicle_license_province": {
@@ -135,11 +140,14 @@ EXTRACTION_SCHEMA = {
             "description": (
                 "The fleet truck number, ONLY if it's actually written on "
                 "the bill itself (e.g. 'เบอร์ 18', 'รถเบอร์ 1', or similar) "
-                "-- do not infer or guess this from the plate, even if a "
-                "reference list below happens to show a matching plate; a "
-                "separate, more reliable lookup step handles that "
-                "afterward. Empty string if no truck number is written on "
-                "the bill."
+                "-- write ONLY the number itself as plain digits (e.g. "
+                "'18'), NEVER include the word 'เบอร์'/'รถเบอร์' or any "
+                "other label text in this field, since it gets displayed "
+                "elsewhere already labeled as a truck number. Do not infer "
+                "or guess this from the plate, even if a reference list "
+                "below happens to show a matching plate; a separate, more "
+                "reliable lookup step handles that afterward. Empty string "
+                "if no truck number is written on the bill."
             ),
         },
         "mileage": {
@@ -343,6 +351,14 @@ def _load_roster_rows() -> list[dict]:
         return list(csv.DictReader(f))
 
 
+def get_roster_rows() -> list[dict]:
+    """Public wrapper for app/bills_routes.py -- the review page ships this
+    to the browser as JSON so it can auto-fill vehicle_number/province
+    client-side the moment a manager types a plate that matches, instead
+    of only running the same lookup server-side at extraction time."""
+    return _load_roster_rows()
+
+
 def _load_vehicle_roster_text() -> str:
     rows = _load_roster_rows()
     if not rows:
@@ -359,20 +375,41 @@ def _load_vehicle_roster_text() -> str:
             bits.append(make_model)
         lines.append("- " + ", ".join(bits))
     return (
-        "Known fleet vehicles. Saraburi branch is fairly complete here; "
-        "Kaeng Khoi branch is INCOMPLETE (many Kaeng Khoi trucks are "
-        "missing from this list). IMPORTANT: truck numbers are NOT unique "
-        "across branches -- e.g. 'truck #6' exists in BOTH Saraburi and "
-        "Kaeng Khoi as two entirely different real vehicles, and most "
-        "numbers 1-10 are duplicated this way. Never assume which branch a "
-        "bare truck number belongs to from this list alone -- only use it "
-        "to help read an ambiguous PLATE, since plates (unlike truck "
-        "numbers) are genuinely unique per vehicle:\n" + "\n".join(lines)
+        "Known fleet vehicles -- a small, mostly closed fleet of roughly "
+        "50-70 trucks across both branches, so treat a plate NOT on this "
+        "list as the unusual case worth double-checking, not the norm. "
+        "That said, this list is manager-maintained and can still be "
+        "slightly out of date (a new vehicle, a re-plated truck), so it's "
+        "a strong hint, not absolute ground truth. IMPORTANT: truck "
+        "numbers are NOT unique across branches -- e.g. 'truck #6' exists "
+        "in BOTH Saraburi and Kaeng Khoi as two entirely different real "
+        "vehicles, and most numbers 1-10 are duplicated this way. Never "
+        "assume which branch a bare truck number belongs to from this "
+        "list alone -- only use it to help read an ambiguous PLATE, since "
+        "plates (unlike truck numbers) are genuinely unique per "
+        "vehicle:\n" + "\n".join(lines)
     )
 
 
 def _normalize_plate(plate: str) -> str:
     return "".join(plate.split())
+
+
+# Words the model sometimes bakes into vehicle_number itself even though the
+# schema asks for digits only (e.g. "เบอร์ 34" instead of "34") -- stripped
+# defensively here rather than trusting the prompt alone, since this value
+# gets displayed already-labeled elsewhere (e.g. "(เบอร์ {vehicle_number})"),
+# and a leftover "เบอร์" prefix shows up doubled.
+_VEHICLE_NUMBER_LABEL_PREFIXES = ("รถเบอร์", "เบอร์รถ", "เบอร์")
+
+
+def _clean_vehicle_number(raw: str) -> str:
+    value = raw.strip()
+    for prefix in _VEHICLE_NUMBER_LABEL_PREFIXES:
+        if value.startswith(prefix):
+            value = value[len(prefix):].strip(" :.-")
+            break
+    return value
 
 
 def lookup_vehicle(plate: str) -> Optional[dict]:
@@ -449,6 +486,7 @@ def extract_bill(file_bytes: bytes, media_type: str) -> dict:
 
     text_block = next(b.text for b in response.content if b.type == "text")
     bill = json.loads(text_block)
+    bill["vehicle_number"] = _clean_vehicle_number(bill.get("vehicle_number") or "")
 
     # Deterministic enrichment + validation against the roster -- see
     # lookup_vehicle's docstring for why this is plate-keyed, never
