@@ -1,5 +1,5 @@
 """
-The scheduled jobs, all pushed to Ohm only (v0 scope):
+The scheduled jobs. All pushed to Ohm only, except #4:
 
 1. open_tickets_reminder -- every 4 hours during 08:00-20:00 Asia/Bangkok,
    digest of open tickets older than 2 hours.
@@ -8,6 +8,11 @@ The scheduled jobs, all pushed to Ohm only (v0 scope):
 3. due_soon_digest -- once a day at 08:00 Asia/Bangkok, heads-up digest of
    tickets whose due date is exactly N days away, for whichever tickets had
    an N-day reminder set (see remind_days_before in app/classifier.py).
+4. mom_car_reminder -- once a day at 08:00 Asia/Bangkok, sent to Mom
+   instead of Ohm: every currently open รถ-department ticket regardless of
+   who reported it. Deliberately just the one daily message, not the every-
+   4h treatment #1 gets -- and unlike #2/#3, no "already reminded" guard,
+   since the point is to re-show whatever's still outstanding each day.
 """
 import logging
 
@@ -50,6 +55,14 @@ def due_soon_digest() -> None:
     logger.info("sent due-soon digest for %d ticket(s)", len(due_soon))
 
 
+def mom_car_reminder() -> None:
+    car_tickets = tickets.get_open_car_tickets()
+    if not car_tickets:
+        return  # nothing car-related open -- skip rather than send an empty list
+    push_message(settings.mom_line_user_id, [strings.mom_car_reminder_digest(car_tickets)])
+    logger.info("sent mom's daily car reminder for %d ticket(s)", len(car_tickets))
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone=TIMEZONE)
     scheduler.add_job(
@@ -66,6 +79,11 @@ def start_scheduler() -> BackgroundScheduler:
         due_soon_digest,
         CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
         id="due_soon_digest",
+    )
+    scheduler.add_job(
+        mom_car_reminder,
+        CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
+        id="mom_car_reminder",
     )
     scheduler.start()
     logger.info("scheduler started (timezone=%s)", TIMEZONE)

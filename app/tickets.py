@@ -265,6 +265,33 @@ def get_all_open_tickets_by_due_date() -> list[dict]:
         conn.close()
 
 
+def get_open_car_tickets() -> list[dict]:
+    """
+    Every currently open รถ-department ticket, across both reporters,
+    soonest due date first -- same ordering convention as
+    get_all_open_tickets_by_due_date(), just filtered to one department.
+    Powers the daily car reminder to Mom (see jobs.py); unlike the
+    due_*_digest jobs there's no "already reminded" guard here, since this
+    is meant to re-show everything still outstanding every day, not notify
+    once per ticket.
+    """
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM tickets
+            WHERE status = 'open' AND department = 'รถ'
+            ORDER BY
+                CASE WHEN due_date IS NULL THEN 1 ELSE 0 END,
+                due_date ASC,
+                created_at DESC
+            """
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def get_open_tickets(min_age_hours: float = 0) -> list[dict]:
     """
     Open tickets, oldest first, each annotated with hours_open. Used both by
