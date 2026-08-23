@@ -97,8 +97,10 @@ EXTRACTION_SCHEMA = {
             "description": (
                 "Whatever digits are shown for the sending account, exactly as displayed -- banking apps commonly "
                 "mask most of the number (e.g. 'xxx-x-x3909' or 'XXX-X-X3909-9'), showing only the last 3-5 "
-                "digits. Write out only the visible digits (e.g. '3909'), ignoring x's/masking characters and "
-                "dashes. Empty string if no account number is shown at all."
+                "digits. Concatenate EVERY visible digit group in order, ignoring x's/masking characters and "
+                "dashes -- including any trailing digit(s) after the LAST dash, which are still part of the same "
+                "account number, not a separate code (e.g. 'XXX-X-X3909-9' has visible digits '3909' then a "
+                "trailing '9' -- write '39099', not '3909'). Empty string if no account number is shown at all."
             ),
         },
         "from_bank": {
