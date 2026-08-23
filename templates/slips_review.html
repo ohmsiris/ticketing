@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>ตรวจสอบ {{ slip.slip_id }}</title>
+    <link rel="stylesheet" href="/static/bills.css">
+</head>
+<body>
+    <div class="page">
+        <a class="back-link" href="/slips?token={{ token }}">&larr; กลับไปหน้ารายการสลิป</a>
+        <h1>{{ slip.slip_id }}
+            <span class="badge badge-{{ slip.status }}">
+                {{ "ยืนยันแล้ว" if slip.status == "verified" else "รอตรวจสอบ" }}
+            </span>
+        </h1>
+        <p class="subtitle">อ่านจาก: {{ slip.source_photo }}</p>
+
+        {% if slip.account_match_warning %}
+        <p class="warning-banner">⚠️ {{ slip.account_match_warning }}</p>
+        {% endif %}
+        {% if slip.cross_branch_note %}
+        <p class="warning-banner">ℹ️ {{ slip.cross_branch_note }}</p>
+        {% endif %}
+
+        <form method="POST" action="/slips/{{ slip.slip_id }}?token={{ token }}" id="review-form">
+            <h2>รายละเอียดการโอน</h2>
+            <div class="field-grid">
+                <label>วันที่
+                    <input type="text" name="transaction_date" value="{{ slip.transaction_date or '' }}" placeholder="YYYY-MM-DD">
+                </label>
+                <label>เวลา
+                    <input type="text" name="transaction_time" value="{{ slip.transaction_time or '' }}" placeholder="HH:MM">
+                </label>
+                <label>จำนวนเงิน
+                    <input type="text" name="amount" value="{{ slip.amount or '' }}">
+                </label>
+
+                <label>จาก (ชื่อบัญชี)
+                    <input type="text" name="from_display_name" value="{{ slip.from_display_name or '' }}">
+                </label>
+                <label>เลขบัญชีต้นทาง (ที่เห็น)
+                    <input type="text" name="from_account_digits" value="{{ slip.from_account_digits or '' }}">
+                </label>
+                <label>ธนาคารต้นทาง
+                    <input type="text" name="from_bank" value="{{ slip.from_bank or '' }}">
+                </label>
+
+                <label>ถึง (ชื่อร้าน/ผู้รับ)
+                    <input type="text" name="to_display_name" value="{{ slip.to_display_name or '' }}">
+                </label>
+                <label>เลขบัญชีปลายทาง (ที่เห็น)
+                    <input type="text" name="to_account_digits" value="{{ slip.to_account_digits or '' }}">
+                </label>
+                <label>ธนาคารปลายทาง
+                    <input type="text" name="to_bank" value="{{ slip.to_bank or '' }}">
+                </label>
+
+                <label class="{{ 'flag-field' if not slip.branch }}">สาขา (คิดต้นทุนตามบัญชีที่จ่าย)
+                    <select name="branch">
+                        <option value="" {% if not slip.branch %}selected{% endif %}></option>
+                        <option value="SRB" {% if slip.branch == "SRB" %}selected{% endif %}>สระบุรี (SRB)</option>
+                        <option value="KK" {% if slip.branch == "KK" %}selected{% endif %}>แก่งคอย (KK)</option>
+                    </select>
+                </label>
+                <label class="{{ 'flag-field' if not slip.account_used_label }}">บัญชีที่ใช้ (ตรวจสอบอีกครั้ง)
+                    <input type="text" name="account_used_label" value="{{ slip.account_used_label or '' }}"
+                           placeholder="{{ 'ไม่พบบัญชีที่ตรงกัน กรอกเอง เช่น KTB • 33909 (Mum, SRB)' if not slip.account_used_label else '' }}">
+                </label>
+                <label>หมวดหมู่ P&amp;L
+                    <select name="pl_category">
+                        {% for cat in categories %}
+                        <option value="{{ cat }}" {% if cat == slip.pl_category %}selected{% endif %}>{{ cat }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label class="wide">รายละเอียด / เพื่ออะไร (จากบันทึกช่วยจำท้ายสลิป)
+                    <input type="text" name="purpose_note" value="{{ slip.purpose_note or '' }}">
+                </label>
+                <label>เลขที่อ้างอิง
+                    <input type="text" name="reference_number" value="{{ slip.reference_number or '' }}">
+                </label>
+            </div>
+
+            <div class="submit-row">
+                <button type="submit">ยืนยันและบันทึกลง Transaction Log</button>
+            </div>
+        </form>
+
+        {% if slip.status == "verified" %}
+        <p class="verified-note">ยืนยันเมื่อ {{ slip.verified_at }} โดย {{ slip.verified_by }}
+            {% if slip.sheet_row %}(แถวที่ {{ slip.sheet_row }} ใน Transaction Log){% endif %}</p>
+        {% endif %}
+    </div>
+</body>
+</html>

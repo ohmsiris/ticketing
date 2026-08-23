@@ -110,6 +110,81 @@ def replace_line_items(bill_id: str, line_items: list[dict]) -> None:
     sheet.append_rows(rows, value_input_option="USER_ENTERED")
 
 
+# --- Payment slips -> the "Accounting" Sheet's "Transaction Log" tab ---
+#
+# That tab (built directly in the Sheet, not by this repo) has LIVE
+# FORMULAS in column A (Entry #) and column O (Month), filled down through
+# row 500 ahead of any data arriving -- see the Accounting project's
+# handoff. Writing to those columns would clobber the formulas, so
+# everything below deliberately touches ONLY columns B:N.
+TRANSACTION_LOG_FIRST_DATA_ROW = 2
+TRANSACTION_LOG_LAST_COL = "N"  # B through N = 13 columns
+
+# slip dict key (or a literal) -> Transaction Log column, in B..N order.
+# branch is translated from the roster's SRB/KK short code to the exact
+# strings the sheet's own Branch dropdown offers (see _branch_label).
+_BRANCH_LABELS = {"SRB": "Saraburi", "KK": "Kaeng Khoi"}
+
+
+def _branch_label(branch_code: str) -> str:
+    return _BRANCH_LABELS.get((branch_code or "").strip(), "")
+
+
+def _slip_row_values(slip: dict) -> list:
+    return [
+        slip.get("transaction_date", ""),           # B: Date
+        "โอนเงิน",                                    # C: Type (this flow is transfers only, never cheques)
+        _branch_label(slip.get("branch", "")),        # D: Branch
+        slip.get("pl_category", ""),                   # E: P&L Category
+        slip.get("to_display_name", ""),                 # F: Payee
+        slip.get("amount", ""),                            # G: Amount
+        slip.get("account_used_label", ""),                  # H: Account Used
+        slip.get("purpose_note", ""),                          # I: Purpose / Note
+        "",                                                      # J: Vehicle (not on a transfer slip)
+        "",                                                        # K: Cheque No. (N/A)
+        "",                                                          # L: Due/Clear Date (N/A)
+        "",                                                            # M: Cheque Status (N/A)
+        slip.get("source_photo", ""),                                    # N: Photo Link (LINE message id)
+    ]
+
+
+def _transaction_log_sheet():
+    return _client_lazy().open_by_key(settings.accounting_sheet_id).worksheet(settings.transaction_log_worksheet)
+
+
+def _find_next_empty_row(sheet) -> int:
+    """First row (>= TRANSACTION_LOG_FIRST_DATA_ROW) with an empty Date
+    column -- column B has no formula in it (unlike A/O), so this is a
+    reliable "first truly unused row" check even though A/O look
+    non-blank that far down from the pre-filled formulas."""
+    date_column = sheet.col_values(2)  # column B
+    return max(len(date_column) + 1, TRANSACTION_LOG_FIRST_DATA_ROW)
+
+
+def sync_verified_slip(slip: dict) -> Optional[int]:
+    """Writes one verified slip into the Transaction Log tab, columns B:N
+    only. Upserts by sheet_row if this slip was already synced before
+    (re-confirming an edited slip updates that row in place); otherwise
+    appends to the first empty Date row. Returns the row number written to
+    -- the caller (app/slips_routes.py) persists it via
+    app.slips.set_sheet_row so the next re-confirm updates in place.
+    Deliberately doesn't raise on failure, mirroring sync_verified_bill:
+    the SQLite row is already the source of truth and stays 'verified'
+    either way, but a failed sync is logged loudly and returns None."""
+    try:
+        sheet = _transaction_log_sheet()
+        values = _slip_row_values(slip)
+        row = slip.get("sheet_row")
+        if not row:
+            row = _find_next_empty_row(sheet)
+        sheet.update(f"B{row}:{TRANSACTION_LOG_LAST_COL}{row}", [values], value_input_option="USER_ENTERED")
+        logger.info("synced slip %s to Transaction Log row %s", slip.get("slip_id"), row)
+        return row
+    except Exception:
+        logger.exception("failed to sync slip %s to the Transaction Log", slip.get("slip_id"))
+        return None
+
+
 def sync_verified_bill(bill: dict) -> bool:
     """Writes one verified bill + its line items to the real Sheets,
     updating in place if this bill_id was already synced before (see

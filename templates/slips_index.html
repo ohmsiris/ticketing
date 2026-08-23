@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>สลิปโอนเงิน</title>
+    <link rel="stylesheet" href="/static/bills.css">
+</head>
+<body>
+    <div class="page">
+        <h1>สลิปโอนเงิน</h1>
+        <p class="subtitle">รายการสลิปที่ระบบอ่านแล้ว — คลิกที่รายการเพื่อตรวจสอบและยืนยัน</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>รหัส</th>
+                    <th>วันที่</th>
+                    <th>ถึง</th>
+                    <th>สาขา</th>
+                    <th>จำนวนเงิน</th>
+                    <th>สถานะ</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for slip in slips %}
+                <tr>
+                    <td>{{ slip.slip_id }}</td>
+                    <td>{{ slip.transaction_date }}</td>
+                    <td>
+                        {{ slip.to_display_name }}
+                        {% if slip.account_match_warning %}<span title="{{ slip.account_match_warning }}">⚠️</span>{% endif %}
+                    </td>
+                    <td>{{ slip.branch }}</td>
+                    <td class="num">{{ slip.amount }}</td>
+                    <td>
+                        <span class="badge badge-{{ slip.status }}">
+                            {{ "ยืนยันแล้ว" if slip.status == "verified" else "รอตรวจสอบ" }}
+                        </span>
+                    </td>
+                    <td><a class="button" href="/slips/{{ slip.slip_id }}?token={{ token }}">
+                        {{ "ดู" if slip.status == "verified" else "ตรวจสอบ" }}
+                    </a></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="empty-note">ยังไม่มีสลิปเข้ามาในระบบ</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

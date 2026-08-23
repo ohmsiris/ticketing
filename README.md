@@ -217,6 +217,42 @@ data that looks broken (e.g. far fewer rows than before, or only one
 branch found) -- it logs a warning and leaves the last-known-good file in
 place, checkable any time in Railway's logs (search for `roster_sync`).
 
+## Payment slip tracking (photographed bank transfer slips -> review page -> the Accounting Sheet)
+
+Same shape as bill tracking above, for a different document type: Mum (or
+Ohm) photographs a bank-transfer slip, Claude reads it
+(`app/slip_extraction.py`), a manager confirms it at `/slips?token=...`,
+and the confirmed row is written into the existing "Accounting" Google
+Sheet's **Transaction Log** tab -- not a separate Sheet, since that tab
+already has the dropdowns/formulas this data needs to slot into.
+
+Every incoming photo/PDF is classified first (`app/image_classifier.py`,
+one small Claude call) as a repair bill, a payment slip, or unclear --
+unclear falls back to the bill flow, so this never regresses bill handling
+that already worked before this feature existed.
+
+**Which branch pays**: the sending account's owner determines cost
+attribution, not what the slip's memo says the money was for -- e.g.
+Saraburi paying a Kaeng Khoi expense is booked as a Saraburi cost. This is
+resolved deterministically via `app/bank_accounts.csv` (a small roster of
+known company/family bank accounts, same role as `vehicle_roster.csv` for
+plates) matched against the sending account's digits on the slip. If the
+memo mentions the *other* branch than the one actually paying, the
+reviewer sees an explicit note explaining why -- see
+`slip_extraction._cross_branch_note`.
+
+Setup, in addition to everything bill tracking already needs:
+1. Share the "Accounting" Google Sheet as **Editor** (not just Viewer --
+   confirmed slips get written there) with the same service account.
+2. Set `ACCOUNTING_SHEET_ID` (defaults to the one already in use for this
+   business if left blank) and, if the tab is ever renamed,
+   `TRANSACTION_LOG_WORKSHEET`.
+
+`app/bank_accounts.csv` is a static committed file for now (unlike the
+vehicle roster, there's no auto-refresh-from-a-Sheet job for it yet) --
+update it by hand if an account is added, closed, or reassigned to a
+different branch.
+
 ## Notes / known limits (v0, by design)
 
 - Text only. Voice notes get a polite "not supported yet, please type it"

@@ -6,11 +6,13 @@ on its own.
 """
 import logging
 
-from app import bills, strings, tickets
+from app import bills, slips, strings, tickets
 from app.bill_extraction import extract_bill
 from app.classifier import classify
 from app.config import settings
+from app.image_classifier import classify_image
 from app.line_client import QuickReplyOption, download_message_content, push_message, reply_message
+from app.slip_extraction import extract_slip
 
 logger = logging.getLogger("ticketing.webhook")
 
@@ -65,7 +67,7 @@ def handle_message_event(event: dict) -> None:
         return
 
     if message_type in ("image", "file"):
-        _handle_bill_message(reporter, message, is_group, reply_token)
+        _handle_photo_message(reporter, message, is_group, reply_token)
         return
 
     if message_type == "audio":
@@ -361,23 +363,26 @@ def _handle_cancel_ticket(
     reply_message(reply_token, [strings.cancel_ticket_picker_prompt()], quick_reply=quick_reply)
 
 
-def _handle_bill_message(reporter: str, message: dict, is_group: bool, reply_token: str) -> None:
+def _handle_photo_message(reporter: str, message: dict, is_group: bool, reply_token: str) -> None:
     """
-    Handles a photographed bill or PDF. Deliberately NEVER replies into a
-    group/room (is_group) -- whatever happens, the confirmation always
-    goes as a PRIVATE push to the manager (OHM_LINE_USER_ID), regardless
-    of who sent the photo or where. In a private chat, a quick "reading
-    it now" ack is sent too since extraction takes a few seconds.
+    Shared entry point for every image/file message -- works out the media
+    type, sends one immediate ack, downloads the file once, then asks
+    app.image_classifier.classify_image() whether it's a repair bill or a
+    payment slip before handing off to the matching flow. "unclear" falls
+    back to the bill flow, today's ONLY behavior before this classifier
+    existed -- a misclassification never regresses bill handling that
+    already works, it just means a genuine slip that gets misread needs a
+    manual nudge, same as any other misread bill would.
 
-    Multi-page bills: LINE delivers a multi-select gallery send as
-    consecutive events from the same sender, so bills.find_open_chain
-    picks up right where the last photo left off. See bills.py for the
-    actual chain/merge logic.
+    Deliberately never replies into a group/room (is_group) beyond the
+    unsupported-file case -- whatever happens after that, the outcome goes
+    as a PRIVATE push to the manager (OHM_LINE_USER_ID), regardless of who
+    sent the photo or where. See _handle_bill_message / _handle_slip_message.
     """
     message_id = message.get("id")
     message_type = message.get("type")
     logger.info(
-        "bill message received: type=%s from=%s group=%s message_id=%s",
+        "photo message received: type=%s from=%s group=%s message_id=%s",
         message_type, reporter, is_group, message_id,
     )
 
@@ -394,10 +399,43 @@ def _handle_bill_message(reporter: str, message: dict, is_group: bool, reply_tok
         media_type = "image/jpeg"  # LINE always serves downloaded images as JPEG regardless of original format
 
     if not is_group:
-        reply_message(reply_token, [strings.bill_processing_ack()])
+        reply_message(reply_token, [strings.photo_processing_ack()])
 
     try:
         file_bytes = download_message_content(message_id)
+    except Exception:
+        logger.exception("failed to download message_id=%s from %s", message_id, reporter)
+        if not is_group:
+            reply_message(reply_token, [strings.bill_extraction_failed()])
+        push_message(
+            settings.ohm_line_user_id,
+            [f"⚠️ ดาวน์โหลดรูปไม่สำเร็จ (จาก {reporter}, message_id={message_id}) เช็ค log ดูนะครับ"],
+        )
+        return
+
+    doc_type = classify_image(file_bytes, media_type)
+    logger.info("classified message_id=%s as %s", message_id, doc_type)
+
+    if doc_type == "payment_slip":
+        _handle_slip_message(reporter, message_id, file_bytes, is_group, reply_token)
+    else:
+        _handle_bill_message(reporter, message_id, file_bytes, media_type, is_group, reply_token)
+
+
+def _handle_bill_message(
+    reporter: str, message_id: str, file_bytes: bytes, media_type: str, is_group: bool, reply_token: str
+) -> None:
+    """
+    Extracts a photographed bill or PDF (bytes already downloaded by
+    _handle_photo_message) and files it for review. See that function's
+    docstring for the never-reply-into-a-group rule.
+
+    Multi-page bills: LINE delivers a multi-select gallery send as
+    consecutive events from the same sender, so bills.find_open_chain
+    picks up right where the last photo left off. See bills.py for the
+    actual chain/merge logic.
+    """
+    try:
         extracted = extract_bill(file_bytes, media_type)
     except Exception:
         logger.exception("bill extraction failed for message_id=%s from %s", message_id, reporter)
@@ -454,6 +492,46 @@ def _handle_bill_message(reporter: str, message: dict, is_group: bool, reply_tok
     review_url = f"{settings.public_base_url}/bills/{bill['bill_id']}?token={settings.review_token}"
     logger.info("bill %s ready for review, notifying manager: %s", bill["bill_id"], review_url)
     push_message(settings.ohm_line_user_id, [strings.bill_ready_for_review(bill, review_url, note)])
+
+
+def _handle_slip_message(
+    reporter: str, message_id: str, file_bytes: bytes, is_group: bool, reply_token: str
+) -> None:
+    """
+    Extracts a photographed bank-transfer slip (bytes already downloaded
+    by _handle_photo_message) and files it for review. No multi-page
+    chaining here -- a slip is always a single transaction on one photo,
+    unlike a bill's line items. media_type is always 'image/jpeg': slips
+    only ever arrive as photos in practice (a PDF bank statement isn't a
+    single-transaction slip), so this flow doesn't handle
+    'application/pdf' -- _handle_photo_message would only route a PDF here
+    if the classifier itself decided a PDF was a payment_slip, which isn't
+    expected but is handled the same as any other slip if it happens.
+    """
+    try:
+        extracted = extract_slip(file_bytes, "image/jpeg")
+    except Exception:
+        logger.exception("slip extraction failed for message_id=%s from %s", message_id, reporter)
+        if not is_group:
+            reply_message(reply_token, [strings.slip_extraction_failed()])
+        push_message(
+            settings.ohm_line_user_id,
+            [f"⚠️ อ่านสลิปไม่สำเร็จ (จาก {reporter}, message_id={message_id}) เช็ค log ดูนะครับ"],
+        )
+        return
+
+    logger.info(
+        "slip extracted OK: to=%r amount=%r branch=%r",
+        extracted.get("to_display_name"), extracted.get("amount"), extracted.get("branch"),
+    )
+
+    slip_id = slips.create_slip(reporter, extracted, message_id)
+    slip = slips.get_slip(slip_id)
+    logger.info("created new slip %s from %s", slip_id, reporter)
+
+    review_url = f"{settings.public_base_url}/slips/{slip_id}?token={settings.review_token}"
+    logger.info("slip %s ready for review, notifying manager: %s", slip_id, review_url)
+    push_message(settings.ohm_line_user_id, [strings.slip_ready_for_review(slip, review_url)])
 
 
 def _ticket_picker_label(ticket: dict) -> str:

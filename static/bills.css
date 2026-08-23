@@ -145,6 +145,7 @@ label {
 }
 
 label.flag-field { color: var(--flag); font-weight: 600; }
+label.wide { grid-column: 1 / -1; }
 
 .match-hint {
     color: var(--verified);

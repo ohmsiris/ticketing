@@ -41,6 +41,9 @@ class Settings:
     # -- vehicle roster auto-refresh (see app/roster_sync.py) --
     drivers_sheet_id: str  # the "Drivers" Google Sheet's id, from its URL
     drivers_roster_worksheet: str  # tab name holding the roster tables; blank = first tab
+    # -- payment-slip tracking (see app/slip_extraction.py, app/slips_routes.py) --
+    accounting_sheet_id: str  # the "Accounting" Google Sheet's id -- verified slips sync to its Transaction Log tab
+    transaction_log_worksheet: str  # tab name; defaults to "Transaction Log"
 
 
 def _env(key: str, default: str = "") -> str:
@@ -76,6 +79,8 @@ def _load() -> Settings:
         public_base_url=_env("PUBLIC_BASE_URL").rstrip("/"),
         drivers_sheet_id=_env("DRIVERS_SHEET_ID"),
         drivers_roster_worksheet=_env("DRIVERS_ROSTER_WORKSHEET"),
+        accounting_sheet_id=_env("ACCOUNTING_SHEET_ID", "1ygXYrtNzLAZ4eUVzD7ydlsACCH0QKHXdmf5LncX6ANM"),
+        transaction_log_worksheet=_env("TRANSACTION_LOG_WORKSHEET", "Transaction Log"),
     )
 
 

@@ -305,14 +305,11 @@ def due_soon_digest(tickets: list[dict]) -> str:
 
 
 # --- Bill tracking ---
-
-
-def bill_processing_ack() -> str:
-    """Sent as an immediate reply in a PRIVATE chat only (never into a
-    group -- see webhook_handler.py) right when a photo/PDF arrives,
-    since extraction takes several seconds and silence would be
-    confusing."""
-    return "📷 กำลังอ่านบิล รอสักครู่นะครับ"
+#
+# The immediate "reading it now" ack shared by both bill and slip photos
+# is photo_processing_ack(), below the payment-slip section -- it's sent
+# before app.image_classifier knows which flow this is, so it isn't
+# specific to either one.
 
 
 def bill_ready_for_review(bill: dict, review_url: str, note: str | None = None) -> str:
@@ -344,3 +341,36 @@ def bill_unsupported_file() -> str:
 
 def bill_extraction_failed() -> str:
     return "อ่านบิลนี้ไม่สำเร็จ ลองส่งใหม่อีกครั้ง หรือถ่ายรูปให้ชัดขึ้นนะครับ"
+
+
+# --- Payment slip tracking ---
+
+
+def photo_processing_ack() -> str:
+    """Sent for EVERY incoming image/file, before app.image_classifier has
+    decided whether it's a bill or a slip -- see webhook_handler.py's
+    _handle_photo_message. Deliberately generic wording since the type
+    isn't known yet at this point."""
+    return "📷 กำลังอ่านรูป รอสักครู่นะครับ"
+
+
+def slip_ready_for_review(slip: dict, review_url: str) -> str:
+    branch_label = {"SRB": "สระบุรี", "KK": "แก่งคอย"}.get(slip.get("branch") or "", "(ไม่ทราบ)")
+    lines = [
+        "✅ สลิปใหม่พร้อมตรวจสอบ",
+        f"ถึง: {slip.get('to_display_name') or '(ไม่ทราบ)'}",
+        f"จำนวนเงิน: {slip.get('amount') or 0} บาท",
+        f"สาขา (ตามบัญชีที่จ่าย): {branch_label}",
+    ]
+    warning = (slip.get("account_match_warning") or "").strip()
+    if warning:
+        lines.append(f"⚠️ {warning}")
+    cross_branch = (slip.get("cross_branch_note") or "").strip()
+    if cross_branch:
+        lines.append(f"ℹ️ {cross_branch}")
+    lines.append(f"ตรวจสอบที่: {review_url}")
+    return "\n".join(lines)
+
+
+def slip_extraction_failed() -> str:
+    return "อ่านสลิปนี้ไม่สำเร็จ ลองส่งใหม่อีกครั้ง หรือถ่ายรูปให้ชัดขึ้นนะครับ"

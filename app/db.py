@@ -81,6 +81,40 @@ CREATE TABLE IF NOT EXISTS bill_line_items (
 
 CREATE INDEX IF NOT EXISTS idx_bills_reporter_status ON bills (reporter, status);
 CREATE INDEX IF NOT EXISTS idx_bill_line_items_bill_id ON bill_line_items (bill_id);
+
+-- Payment-slip tracking (bank transfer slips -- separate concern from
+-- bills, one row per transaction, no line items). branch/account_used_label
+-- are the deterministic app/slip_extraction.lookup_account() result, not
+-- raw OCR -- see that module's docstring for the "whoever paid" rule.
+CREATE TABLE IF NOT EXISTS slips (
+    slip_id                TEXT PRIMARY KEY,       -- e.g. 'SL-20260823-7K3M'
+    status                  TEXT NOT NULL DEFAULT 'pending_review'
+                                CHECK (status IN ('pending_review', 'verified')),
+    reporter                TEXT NOT NULL CHECK (reporter IN ('ohm', 'mom')),
+    transaction_date        TEXT,
+    transaction_time        TEXT,
+    from_display_name       TEXT,
+    from_account_digits     TEXT,
+    from_bank                TEXT,
+    to_display_name          TEXT,
+    to_account_digits        TEXT,
+    to_bank                   TEXT,
+    amount                    TEXT,
+    purpose_note               TEXT,
+    reference_number            TEXT,
+    branch                       TEXT,   -- deterministic, from bank_accounts.csv via the paying account
+    account_used_label            TEXT,  -- canonical string matching the Sheet's Account Used dropdown
+    account_match_warning          TEXT, -- set when from_account_digits didn't match any known account
+    cross_branch_note                TEXT, -- informational, see slip_extraction._cross_branch_note
+    pl_category                        TEXT,  -- reviewer-confirmed P&L category (starts as a suggestion)
+    source_photo                        TEXT,  -- LINE message id, for traceability (bytes not persisted, same as bills)
+    created_at                            TEXT NOT NULL,
+    verified_at                            TEXT,
+    verified_by                             TEXT,
+    sheet_row                                INTEGER  -- Transaction Log row once synced; re-confirm updates it in place
+);
+
+CREATE INDEX IF NOT EXISTS idx_slips_reporter_status ON slips (reporter, status);
 """
 
 

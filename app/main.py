@@ -24,6 +24,7 @@ from app.dashboard import render_tickets_csv, render_tickets_page
 from app.db import init_db
 from app.jobs import start_scheduler
 from app.line_client import verify_signature
+from app.slips_routes import router as slips_router
 from app.webhook_handler import handle_follow_event, handle_message_event
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -45,6 +46,7 @@ if _static_dir.is_dir():
     app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 app.include_router(bills_router)
+app.include_router(slips_router)
 
 
 @app.get("/health")

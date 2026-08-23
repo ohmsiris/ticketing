@@ -1,0 +1,9 @@
+last_digits,bank,account_type,whose_name,branch,province,status,account_label,notes
+16986,KTB,Company,Company (SRB entity),SRB,Bangkok,Active,"KTB •16986 (Company, SRB)",Company account opened in Bangkok used for SRB operations
+60402,KTB,Company,Company (SRB entity),SRB,Saraburi,Active,"KTB •60402 (Company, SRB)",
+59635,KTB,Personal,Grandma,SRB,Bangkok,Active,"KTB •59635 (Grandma, SRB)",Opened in Bangkok used for SRB
+33909,KTB,Personal,Mum,SRB,Saraburi,Active,"KTB •33909 (Mum, SRB)",
+95279,SCB,Personal,Mum,SRB,Saraburi,Active,"SCB •95279 (Mum, SRB)",
+,Unknown,Unknown,Unknown,KK,Bangkok,Unconfirmed,"Unknown bank (KK, unconfirmed)",Digits/bank not yet confirmed -- cannot be matched from a slip photo until known
+6254,KBank (assumed),Personal,Mum,KK,Saraburi,Active,"KBank(assumed) •6254 (Mum, KK)",Bank assumed not fully confirmed
+18229,KTB,Personal,Mum,KK,Saraburi,Active,"KTB •18229 (Mum, KK)",
