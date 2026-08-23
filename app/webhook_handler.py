@@ -198,6 +198,11 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
                 return
             tickets.set_remind_days_before(ticket["id"], remind_days_before)
             display_text = ticket["summary"] or ticket["message"]
+            if reporter != "ohm":
+                push_message(
+                    settings.ohm_line_user_id,
+                    [strings.remind_days_before_set_notify_hq(ticket["id"], reporter, display_text, remind_days_before)],
+                )
             reply_message(reply_token, [strings.remind_days_before_set(ticket["id"], display_text, remind_days_before)])
             return
 
@@ -217,6 +222,11 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
         tickets.set_remind_days_before(ticket["id"], remind_days_before)
 
     display_text = ticket["summary"] or ticket["message"]
+    if reporter != "ohm":
+        push_message(
+            settings.ohm_line_user_id,
+            [strings.due_date_set_notify_hq(ticket["id"], reporter, display_text, due_date, remind_days_before)],
+        )
     reply_message(
         reply_token, [strings.due_date_set(ticket["id"], display_text, due_date, remind_days_before)]
     )
@@ -235,6 +245,11 @@ def _handle_close_ticket(reporter: str, result: dict, actionable_tickets: list[d
         if ticket is None:
             reply_message(reply_token, [strings.ticket_not_found_or_closed(ticket_id)])
             return
+        if reporter != "ohm":
+            push_message(
+                settings.ohm_line_user_id,
+                [strings.ticket_closed_notify_hq(ticket["id"], reporter, ticket["summary"] or ticket["message"])],
+            )
         reply_message(reply_token, [strings.ticket_closed(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
@@ -258,6 +273,11 @@ def _handle_close_ticket(reporter: str, result: dict, actionable_tickets: list[d
         # Generic close phrase, nothing to match against, and only one
         # candidate -- safe to assume that's the one.
         ticket = tickets.close_ticket_by_id(actionable_tickets[0]["id"], reporter)
+        if reporter != "ohm":
+            push_message(
+                settings.ohm_line_user_id,
+                [strings.ticket_closed_notify_hq(ticket["id"], reporter, ticket["summary"] or ticket["message"])],
+            )
         reply_message(reply_token, [strings.ticket_closed(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
@@ -289,6 +309,11 @@ def _handle_cancel_ticket(
         if ticket is None:
             reply_message(reply_token, [strings.ticket_not_found_or_closed(ticket_id)])
             return
+        if reporter != "ohm":
+            push_message(
+                settings.ohm_line_user_id,
+                [strings.ticket_cancelled_notify_hq(ticket["id"], reporter, ticket["summary"] or ticket["message"])],
+            )
         reply_message(reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
@@ -299,6 +324,11 @@ def _handle_cancel_ticket(
     if awaiting_due_date:
         ticket = tickets.cancel_most_recent_missing_due_date_ticket(reporter)
         if ticket is not None:
+            if reporter != "ohm":
+                push_message(
+                    settings.ohm_line_user_id,
+                    [strings.ticket_cancelled_notify_hq(ticket["id"], reporter, ticket["summary"] or ticket["message"])],
+                )
             reply_message(
                 reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])]
             )
@@ -314,6 +344,11 @@ def _handle_cancel_ticket(
         # Generic cancel phrase, nothing to disambiguate, only one
         # candidate -- safe to assume that's the one.
         ticket = tickets.cancel_ticket_by_id(actionable_tickets[0]["id"], reporter)
+        if reporter != "ohm":
+            push_message(
+                settings.ohm_line_user_id,
+                [strings.ticket_cancelled_notify_hq(ticket["id"], reporter, ticket["summary"] or ticket["message"])],
+            )
         reply_message(reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 

@@ -76,6 +76,15 @@ def due_date_set(ticket_id: int, message: str, due_date: str, remind_days_before
     return text + _remind_days_before_line(remind_days_before)
 
 
+def due_date_set_notify_hq(
+    ticket_id: int, reporter: str, message: str, due_date: str, remind_days_before: int | None = None
+) -> str:
+    """Real-time push to Ohm whenever anyone else sets/changes a due date
+    -- same idea as new_ticket_notify_hq, see _handle_due_date_reply."""
+    text = f"🗓️ ตั้งกำหนดวันจาก {_reporter_label(reporter)} (#{ticket_id})\n{_snippet(message, 120)}\n📅 กำหนด: {due_date}"
+    return text + _remind_days_before_line(remind_days_before)
+
+
 def _remind_days_before_line(remind_days_before: int | None) -> str:
     if remind_days_before is None:
         return ""
@@ -86,6 +95,15 @@ def remind_days_before_set(ticket_id: int, message: str, remind_days_before: int
     """Confirmation for a standalone reminder-lead-time message, not attached
     to setting/changing the due date itself."""
     return f"🔔 ตั้งเตือนล่วงหน้าแล้ว (#{ticket_id})\n{_snippet(message)}\nจะเตือนก่อนถึงกำหนด {remind_days_before} วัน"
+
+
+def remind_days_before_set_notify_hq(ticket_id: int, reporter: str, message: str, remind_days_before: int) -> str:
+    """Real-time push to Ohm for the standalone reminder-lead-time case
+    (not attached to a due-date change) -- see _handle_due_date_reply."""
+    return (
+        f"🔔 ตั้งเตือนล่วงหน้าจาก {_reporter_label(reporter)} (#{ticket_id})\n"
+        f"{_snippet(message, 120)}\nเตือนก่อนถึงกำหนด {remind_days_before} วัน"
+    )
 
 
 def no_ticket_for_reminder() -> str:
@@ -109,6 +127,14 @@ def due_date_in_past(due_date: str) -> str:
 
 def ticket_closed(ticket_id: int, message: str) -> str:
     return f"ปิดงาน #{ticket_id} แล้ว\n{_snippet(message)}"
+
+
+def ticket_closed_notify_hq(ticket_id: int, reporter: str, message: str) -> str:
+    """Real-time push to Ohm whenever anyone else closes a ticket -- same
+    idea as new_ticket_notify_hq, see _handle_close_ticket. Fires
+    regardless of whose ticket it was (the shared รถ/พนักงาน/อื่นๆ pool
+    means the actor and the original reporter can differ)."""
+    return f"☑️ ปิดงานจาก {_reporter_label(reporter)} (#{ticket_id})\n{_snippet(message, 120)}"
 
 
 def no_open_ticket_to_close() -> str:
@@ -135,6 +161,14 @@ def close_ticket_no_match_prompt() -> str:
 
 def ticket_cancelled(ticket_id: int, message: str) -> str:
     return f"ยกเลิกงาน #{ticket_id} แล้ว\n{_snippet(message)}"
+
+
+def ticket_cancelled_notify_hq(ticket_id: int, reporter: str, message: str) -> str:
+    """Real-time push to Ohm whenever anyone else cancels a ticket -- same
+    idea as new_ticket_notify_hq, see _handle_cancel_ticket. Fires
+    regardless of whose ticket it was, same reasoning as
+    ticket_closed_notify_hq."""
+    return f"🚫 ยกเลิกงานจาก {_reporter_label(reporter)} (#{ticket_id})\n{_snippet(message, 120)}"
 
 
 def no_open_ticket_to_cancel() -> str:
