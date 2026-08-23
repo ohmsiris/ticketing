@@ -158,6 +158,17 @@ def _handle_new_ticket(reporter: str, text: str, result: dict, reply_token: str)
     if remind_days_before is not None:
         tickets.set_remind_days_before(ticket_id, remind_days_before)
 
+    # Real-time heads-up to Ohm (HQ) whenever someone else reports
+    # something -- he sees it the moment it happens, not just later via
+    # the scheduled digests (which only cover what's still open, not "this
+    # just came in"). Skip when Ohm is the one reporting; he doesn't need
+    # to be told about his own message.
+    if reporter != "ohm":
+        push_message(
+            settings.ohm_line_user_id,
+            [strings.new_ticket_notify_hq(ticket_id, reporter, department, summary, due_date, remind_days_before)],
+        )
+
     if due_date is not None:
         reply_texts = [
             strings.new_ticket_confirmation_with_due_date(ticket_id, summary, department, due_date, remind_days_before)

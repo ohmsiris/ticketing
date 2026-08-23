@@ -45,6 +45,28 @@ def new_ticket_confirmation_with_due_date(
     return text + _remind_days_before_line(remind_days_before)
 
 
+def new_ticket_notify_hq(
+    ticket_id: int,
+    reporter: str,
+    department: str,
+    message: str,
+    due_date: str | None = None,
+    remind_days_before: int | None = None,
+) -> str:
+    """
+    Real-time push to Ohm (HQ) whenever anyone else's message creates a
+    ticket -- separate from that person's own confirmation reply, and
+    separate from the scheduled digests (which only resurface what's
+    still open later, not "this just happened"). See _handle_new_ticket
+    in webhook_handler.py, which skips this when Ohm is the reporter --
+    no need to tell him about his own message.
+    """
+    lines = [f"🆕 งานใหม่จาก {_reporter_label(reporter)} (#{ticket_id}) แผนก: {department}", _snippet(message, 120)]
+    if due_date:
+        lines.append(f"📅 กำหนด: {due_date}")
+    return "\n".join(lines) + _remind_days_before_line(remind_days_before)
+
+
 def ask_due_date() -> str:
     return "มีกำหนดวันไหมครับ? บอกเป็นจำนวนวัน หรือระบุวันที่ก็ได้"
 
