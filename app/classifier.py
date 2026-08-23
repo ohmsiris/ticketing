@@ -222,9 +222,26 @@ class Classification(TypedDict):
     banter_reply: Optional[str]
 
 
-def _default_classification() -> Classification:
+def _default_classification(awaiting_due_date: bool = False) -> Classification:
+    """
+    Used both as classify()'s pre-call starting value and its exception
+    fallback -- if the API call fails, or returns something unparseable or
+    an intent we don't recognize, this is exactly what the caller gets.
+
+    Reported live: a transient API hiccup while someone had a pending
+    "when's this due?" question turned a plain date reply ("24/8/69") into
+    a phantom new ticket literally titled "24/8/69" -- because this always
+    defaulted to new_ticket regardless of context. Defaulting to
+    due_date_reply instead when awaiting_due_date is true (both date
+    fields left null, which just asks them to repeat the date -- see
+    due_date_unclear() in webhook_handler.py) avoids that without giving
+    up the "never silently drop a message" principle: a reply to a
+    just-asked question was never a candidate to be a fresh report in the
+    first place. Outside that context, new_ticket remains the right
+    default.
+    """
     return {
-        "intent": "new_ticket",
+        "intent": "due_date_reply" if awaiting_due_date else "new_ticket",
         "department": DEFAULT_DEPARTMENT,
         "summary": None,
         "due_date_days": None,
@@ -254,7 +271,11 @@ def classify(
     """
     Classifies a single incoming text message. Never raises -- on any error,
     or if the model returns an intent we don't recognize, this falls back to
-    "new_ticket" (better to log something as a ticket than silently drop it).
+    "new_ticket" (better to log something as a ticket than silently drop
+    it) -- except when awaiting_due_date is true, where it falls back to
+    "due_date_reply" instead, so a failure while someone's mid-reply to
+    "when's this due?" asks them to repeat it rather than fabricating a
+    phantom ticket out of what was never a candidate to be a fresh report.
 
     awaiting_due_date: pass True when the sender has an open ticket still
     missing a due date, so the classifier knows a short reply is more likely
@@ -270,7 +291,7 @@ def classify(
         system += CONTEXT_AWAITING_DUE_DATE
     system += _open_tickets_context(open_tickets)
 
-    result = _default_classification()
+    result = _default_classification(awaiting_due_date)
     raw_text = None
     try:
         response = _client_lazy().messages.create(
@@ -292,7 +313,10 @@ def classify(
 
         intent = parsed.get("intent")
         if intent not in KNOWN_INTENTS:
-            intent = "new_ticket"  # unsure -> log as a ticket, don't drop it
+            # unrecognized/hallucinated intent value -- same reasoning as
+            # _default_classification()'s fallback: don't manufacture a
+            # phantom ticket out of what's likely a pending due-date answer
+            intent = "due_date_reply" if awaiting_due_date else "new_ticket"
 
         department = parsed.get("department")
         if department not in KNOWN_DEPARTMENTS:
@@ -325,7 +349,10 @@ def classify(
             "banter_reply": banter_reply,
         }
     except Exception:
-        logger.exception("classification failed, defaulting to new_ticket")
+        logger.exception(
+            "classification failed, defaulting to %s",
+            "due_date_reply (awaiting_due_date)" if awaiting_due_date else "new_ticket",
+        )
 
     # NOTE: "other" used to be force-converted to "new_ticket" here, on the
     # theory that a low-confidence read should still make a ticket rather

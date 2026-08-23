@@ -8,11 +8,12 @@ The scheduled jobs. All pushed to Ohm only, except #4:
 3. due_soon_digest -- once a day at 08:00 Asia/Bangkok, heads-up digest of
    tickets whose due date is exactly N days away, for whichever tickets had
    an N-day reminder set (see remind_days_before in app/classifier.py).
-4. mom_car_reminder -- once a day at 08:00 Asia/Bangkok, sent to Mom
+4. mom_car_reminder -- 08:00, 12:00, and 16:00 Asia/Bangkok, sent to Mom
    instead of Ohm: every currently open รถ-department ticket regardless of
-   who reported it. Deliberately just the one daily message, not the every-
-   4h treatment #1 gets -- and unlike #2/#3, no "already reminded" guard,
-   since the point is to re-show whatever's still outstanding each day.
+   who reported it. Deliberately three fixed times, not #1's every-4h-
+   from-8-to-20 pattern (that one nagged all day and got noticed) --
+   unlike #2/#3, no "already reminded" guard either, since the point is
+   to re-show whatever's still outstanding each time it fires.
 5. roster_refresh -- once a day at 03:00 Asia/Bangkok (quiet hours), re-
    pulls app/vehicle_roster.csv from the real Drivers Google Sheet so
    plate/truck-number edits made there show up in bill matching without
@@ -92,7 +93,7 @@ def start_scheduler() -> BackgroundScheduler:
     )
     scheduler.add_job(
         mom_car_reminder,
-        CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
+        CronTrigger(hour="8,12,16", minute=0, timezone=TIMEZONE),
         id="mom_car_reminder",
     )
     scheduler.add_job(
