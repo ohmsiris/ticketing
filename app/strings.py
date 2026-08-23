@@ -197,14 +197,18 @@ def open_tickets_digest(tickets: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def mom_car_reminder_digest(tickets: list[dict]) -> str:
-    """tickets: list of dicts with id, reporter, message, summary, due_date --
-    every open รถ-department ticket, soonest due date first. Sent to Mom
-    daily at 08:00, whoever originally reported each one (see jobs.py)."""
-    lines = [f"🚗 งานรถที่ยังค้างอยู่ {len(tickets)} รายการ:"]
+def mom_shared_reminder_digest(tickets: list[dict]) -> str:
+    """tickets: list of dicts with id, reporter, department, message, summary,
+    due_date -- every open ticket outside เครื่องจักร (machinery), soonest due
+    date first. Sent to Mom 3x/day, whoever originally reported each one
+    (see jobs.py). Department shown per line since this now spans more
+    than one (รถ/พนักงาน/อื่นๆ), unlike the old car-only version."""
+    lines = [f"📋 งานที่ยังค้างอยู่ {len(tickets)} รายการ:"]
     for t in tickets:
         due = f"กำหนด: {t['due_date']}" if t["due_date"] else "ไม่มีกำหนด"
-        lines.append(f"#{t['id']} [{_reporter_label(t['reporter'])}] {_snippet(_display_text(t))} ({due})")
+        lines.append(
+            f"#{t['id']} [{_reporter_label(t['reporter'])}/{t['department']}] {_snippet(_display_text(t))} ({due})"
+        )
     return "\n".join(lines)
 
 

@@ -201,9 +201,10 @@ def _open_tickets_context(open_tickets: Optional[list]) -> str:
     close_ticket/cancel_ticket can be matched by content
     ("ปิดงานเปลี่ยนน้ำมัน") instead of requiring an exact id every time --
     see those rules above. This is their own open tickets PLUS the shared
-    รถ-department pool (see get_actionable_tickets_for in tickets.py) --
-    i.e. not strictly "their own" -- so a car ticket the other person filed
-    can legitimately appear and get matched here too.
+    pool -- every department except เครื่องจักร/machinery (see
+    get_actionable_tickets_for in tickets.py) -- i.e. not strictly "their
+    own", so a shared-department ticket the other person filed can
+    legitimately appear and get matched here too.
     """
     if not open_tickets:
         return "\n\nThis person has no open tickets right now."

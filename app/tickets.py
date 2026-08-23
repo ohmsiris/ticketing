@@ -12,6 +12,13 @@ from app.db import get_conn
 
 BANGKOK = ZoneInfo(TIMEZONE)
 
+# Every department except machinery is a shared pool -- either reporter can
+# see/close/cancel these regardless of who filed them (originally just รถ,
+# widened per explicit request: "everything apart from machinery"). Kept as
+# one constant so the close/cancel guard and the shared-reminder query can
+# never quietly drift apart from each other.
+PRIVATE_DEPARTMENT = "เครื่องจักร"
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -69,10 +76,11 @@ def get_open_tickets_for_reporter(reporter: str) -> list[dict]:
     awaiting-due-date signal (see CONTEXT_AWAITING_DUE_DATE in
     app/classifier.py) and due-date targeting (set_due_date(),
     cancel_most_recent_missing_due_date_ticket()). Deliberately NOT
-    widened to include the shared car pool (see get_actionable_tickets_for
+    widened to include the shared pool (see get_actionable_tickets_for
     below) -- "did my own ticket-creation flow just ask me a due-date
     question" is a personal, sequential conversational thread, not
-    something someone else's car ticket lacking a date should trigger.
+    something someone else's shared-department ticket lacking a date
+    should trigger.
     """
     conn = get_conn()
     try:
@@ -87,23 +95,24 @@ def get_open_tickets_for_reporter(reporter: str) -> list[dict]:
 
 def get_actionable_tickets_for(reporter: str) -> list[dict]:
     """
-    This reporter's own open tickets, PLUS every open รถ-department ticket
-    regardless of who filed it -- cars are a shared pool either person can
-    close or cancel, everything else stays private to whoever reported it
-    (see close_ticket_by_id / cancel_ticket_by_id, which enforce this same
-    rule at the DB level, not just here). Used to build the classifier's
-    content-matching context and the close/cancel candidate list (single-
-    target shortcut / tap-to-pick picker) in app/webhook_handler.py.
+    This reporter's own open tickets, PLUS every open ticket outside
+    PRIVATE_DEPARTMENT (machinery) regardless of who filed it -- that's the
+    shared pool either person can close or cancel; machinery stays private
+    to whoever reported it (see close_ticket_by_id / cancel_ticket_by_id,
+    which enforce this same rule at the DB level, not just here). Used to
+    build the classifier's content-matching context and the close/cancel
+    candidate list (single-target shortcut / tap-to-pick picker) in
+    app/webhook_handler.py.
     """
     conn = get_conn()
     try:
         rows = conn.execute(
             """
             SELECT * FROM tickets
-            WHERE status = 'open' AND (reporter = ? OR department = 'รถ')
+            WHERE status = 'open' AND (reporter = ? OR department != ?)
             ORDER BY created_at ASC
             """,
-            (reporter,),
+            (reporter, PRIVATE_DEPARTMENT),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
     finally:
@@ -165,19 +174,19 @@ def most_recent_open_ticket(reporter: str) -> Optional[dict]:
 
 def close_ticket_by_id(ticket_id: int, reporter: str) -> Optional[dict]:
     """
-    Scoped to reporter, EXCEPT รถ-department tickets -- those are a shared
-    pool either person can close regardless of who filed it (see
-    get_actionable_tickets_for). Everything else stays private: an
-    explicitly typed number for a non-car ticket still can't touch the
-    other person's ticket, which is the whole reason this guard exists in
-    the first place -- one person naming a number shouldn't be able to
+    Scoped to reporter, EXCEPT PRIVATE_DEPARTMENT (machinery) tickets --
+    every other department is a shared pool either person can close
+    regardless of who filed it (see get_actionable_tickets_for). Machinery
+    stays private: an explicitly typed number for one still can't touch
+    the other person's ticket, which is the whole reason this guard exists
+    in the first place -- one person naming a number shouldn't be able to
     close a report that isn't theirs and isn't shared.
     """
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM tickets WHERE id = ? AND status = 'open' AND (reporter = ? OR department = 'รถ')",
-            (ticket_id, reporter),
+            "SELECT * FROM tickets WHERE id = ? AND status = 'open' AND (reporter = ? OR department != ?)",
+            (ticket_id, reporter, PRIVATE_DEPARTMENT),
         ).fetchone()
         if row is None:
             return None
@@ -196,14 +205,14 @@ def cancel_ticket_by_id(ticket_id: int, reporter: str) -> Optional[dict]:
     just reported). Stored as status='closed' plus cancelled_at set, so it
     drops out of every open-ticket query exactly like a real close does,
     but the dashboard/digests can still tell the two apart and label it
-    accordingly (see app/dashboard.py). Same reporter/รถ-shared-pool scoping
+    accordingly (see app/dashboard.py). Same reporter/shared-pool scoping
     as close_ticket_by_id, for the same reason.
     """
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM tickets WHERE id = ? AND status = 'open' AND (reporter = ? OR department = 'รถ')",
-            (ticket_id, reporter),
+            "SELECT * FROM tickets WHERE id = ? AND status = 'open' AND (reporter = ? OR department != ?)",
+            (ticket_id, reporter, PRIVATE_DEPARTMENT),
         ).fetchone()
         if row is None:
             return None
@@ -294,27 +303,29 @@ def get_all_open_tickets_by_due_date() -> list[dict]:
         conn.close()
 
 
-def get_open_car_tickets() -> list[dict]:
+def get_shared_open_tickets() -> list[dict]:
     """
-    Every currently open รถ-department ticket, across both reporters,
-    soonest due date first -- same ordering convention as
-    get_all_open_tickets_by_due_date(), just filtered to one department.
-    Powers the daily car reminder to Mom (see jobs.py); unlike the
-    due_*_digest jobs there's no "already reminded" guard here, since this
-    is meant to re-show everything still outstanding every day, not notify
-    once per ticket.
+    Every currently open ticket outside PRIVATE_DEPARTMENT (machinery),
+    across both reporters, soonest due date first -- same ordering
+    convention as get_all_open_tickets_by_due_date(), just excluding one
+    department. Powers the shared reminder to Mom (see jobs.py:
+    mom_shared_reminder, 3x/day); unlike the due_*_digest jobs there's no
+    "already reminded" guard here, since this is meant to re-show
+    everything still outstanding every time it fires, not notify once per
+    ticket.
     """
     conn = get_conn()
     try:
         rows = conn.execute(
             """
             SELECT * FROM tickets
-            WHERE status = 'open' AND department = 'รถ'
+            WHERE status = 'open' AND department != ?
             ORDER BY
                 CASE WHEN due_date IS NULL THEN 1 ELSE 0 END,
                 due_date ASC,
                 created_at DESC
-            """
+            """,
+            (PRIVATE_DEPARTMENT,),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
     finally:

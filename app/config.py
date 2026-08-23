@@ -43,23 +43,39 @@ class Settings:
     drivers_roster_worksheet: str  # tab name holding the roster tables; blank = first tab
 
 
+def _env(key: str, default: str = "") -> str:
+    """
+    os.environ.get(), stripped. Reported live: MOM_LINE_USER_ID in Railway
+    had an invisible trailing character (whitespace/newline from however
+    it got pasted in) that made it byte-for-byte different from the real
+    LINE userId arriving on every webhook call -- resolve_reporter()'s
+    exact `==` compare silently failed every single time, so every message
+    Mom sent got logged as "unknown" and dropped with no reply at all, no
+    error anywhere. A LINE userId (or any of these other ids/tokens) never
+    legitimately contains leading/trailing whitespace, so stripping here
+    is always safe and closes off this whole class of bug regardless of
+    how the stray character got in.
+    """
+    return os.environ.get(key, default).strip()
+
+
 def _load() -> Settings:
     return Settings(
-        line_channel_secret=os.environ.get("LINE_CHANNEL_SECRET", ""),
-        line_channel_access_token=os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", ""),
-        ohm_line_user_id=os.environ.get("OHM_LINE_USER_ID", ""),
-        mom_line_user_id=os.environ.get("MOM_LINE_USER_ID", ""),
-        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-        db_path=os.environ.get("DB_PATH", "data/tickets.db"),
-        port=int(os.environ.get("PORT", "8000")),
-        dashboard_token=os.environ.get("DASHBOARD_TOKEN", ""),
-        google_service_account_json=os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", ""),
-        bills_sheet_id=os.environ.get("BILLS_SHEET_ID", ""),
-        line_items_sheet_id=os.environ.get("LINE_ITEMS_SHEET_ID", ""),
-        review_token=os.environ.get("REVIEW_TOKEN", ""),
-        public_base_url=os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"),
-        drivers_sheet_id=os.environ.get("DRIVERS_SHEET_ID", ""),
-        drivers_roster_worksheet=os.environ.get("DRIVERS_ROSTER_WORKSHEET", ""),
+        line_channel_secret=_env("LINE_CHANNEL_SECRET"),
+        line_channel_access_token=_env("LINE_CHANNEL_ACCESS_TOKEN"),
+        ohm_line_user_id=_env("OHM_LINE_USER_ID"),
+        mom_line_user_id=_env("MOM_LINE_USER_ID"),
+        anthropic_api_key=_env("ANTHROPIC_API_KEY"),
+        db_path=_env("DB_PATH", "data/tickets.db"),
+        port=int(_env("PORT", "8000")),
+        dashboard_token=_env("DASHBOARD_TOKEN"),
+        google_service_account_json=_env("GOOGLE_SERVICE_ACCOUNT_JSON"),
+        bills_sheet_id=_env("BILLS_SHEET_ID"),
+        line_items_sheet_id=_env("LINE_ITEMS_SHEET_ID"),
+        review_token=_env("REVIEW_TOKEN"),
+        public_base_url=_env("PUBLIC_BASE_URL").rstrip("/"),
+        drivers_sheet_id=_env("DRIVERS_SHEET_ID"),
+        drivers_roster_worksheet=_env("DRIVERS_ROSTER_WORKSHEET"),
     )
 
 

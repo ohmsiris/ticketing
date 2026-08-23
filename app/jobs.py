@@ -8,12 +8,14 @@ The scheduled jobs. All pushed to Ohm only, except #4:
 3. due_soon_digest -- once a day at 08:00 Asia/Bangkok, heads-up digest of
    tickets whose due date is exactly N days away, for whichever tickets had
    an N-day reminder set (see remind_days_before in app/classifier.py).
-4. mom_car_reminder -- 08:00, 12:00, and 16:00 Asia/Bangkok, sent to Mom
-   instead of Ohm: every currently open รถ-department ticket regardless of
-   who reported it. Deliberately three fixed times, not #1's every-4h-
-   from-8-to-20 pattern (that one nagged all day and got noticed) --
-   unlike #2/#3, no "already reminded" guard either, since the point is
-   to re-show whatever's still outstanding each time it fires.
+4. mom_shared_reminder -- 08:00, 12:00, and 16:00 Asia/Bangkok, sent to Mom
+   instead of Ohm: every currently open ticket outside เครื่องจักร
+   (machinery), regardless of who reported it -- originally cars only,
+   widened per explicit request ("everything apart from machinery").
+   Deliberately three fixed times, not #1's every-4h-from-8-to-20 pattern
+   (that one nagged all day and got noticed) -- unlike #2/#3, no "already
+   reminded" guard either, since the point is to re-show whatever's still
+   outstanding each time it fires.
 5. roster_refresh -- once a day at 03:00 Asia/Bangkok (quiet hours), re-
    pulls app/vehicle_roster.csv from the real Drivers Google Sheet so
    plate/truck-number edits made there show up in bill matching without
@@ -62,12 +64,12 @@ def due_soon_digest() -> None:
     logger.info("sent due-soon digest for %d ticket(s)", len(due_soon))
 
 
-def mom_car_reminder() -> None:
-    car_tickets = tickets.get_open_car_tickets()
-    if not car_tickets:
-        return  # nothing car-related open -- skip rather than send an empty list
-    push_message(settings.mom_line_user_id, [strings.mom_car_reminder_digest(car_tickets)])
-    logger.info("sent mom's daily car reminder for %d ticket(s)", len(car_tickets))
+def mom_shared_reminder() -> None:
+    shared_tickets = tickets.get_shared_open_tickets()
+    if not shared_tickets:
+        return  # nothing outstanding open -- skip rather than send an empty list
+    push_message(settings.mom_line_user_id, [strings.mom_shared_reminder_digest(shared_tickets)])
+    logger.info("sent mom's shared reminder for %d ticket(s)", len(shared_tickets))
 
 
 def roster_refresh() -> None:
@@ -92,9 +94,9 @@ def start_scheduler() -> BackgroundScheduler:
         id="due_soon_digest",
     )
     scheduler.add_job(
-        mom_car_reminder,
+        mom_shared_reminder,
         CronTrigger(hour="8,12,16", minute=0, timezone=TIMEZONE),
-        id="mom_car_reminder",
+        id="mom_shared_reminder",
     )
     scheduler.add_job(
         roster_refresh,

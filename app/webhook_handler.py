@@ -96,12 +96,13 @@ def handle_message_event(event: dict) -> None:
     # "when's this due?" question -- a personal, sequential thread, so it
     # stays scoped to their own tickets only (see get_open_tickets_for_reporter).
     # actionable_tickets: everything close_ticket/cancel_ticket can act on --
-    # their own tickets, PLUS the shared car pool (any open รถ ticket,
-    # regardless of who filed it) -- fed to the classifier for content-
-    # matching and to the close/cancel handlers for the single-target/
-    # picker logic. Two different lists on purpose: someone else's open
-    # car ticket shouldn't make a short reply read as answering a due-date
-    # question that was never asked of THIS sender.
+    # their own tickets, PLUS the shared pool (any open ticket outside
+    # เครื่องจักร/machinery, regardless of who filed it) -- fed to the
+    # classifier for content-matching and to the close/cancel handlers for
+    # the single-target/picker logic. Two different lists on purpose:
+    # someone else's open shared-department ticket shouldn't make a short
+    # reply read as answering a due-date question that was never asked of
+    # THIS sender.
     open_tickets_for_reporter = tickets.get_open_tickets_for_reporter(reporter)
     awaiting_due_date = any(t["due_date"] is None for t in open_tickets_for_reporter)
     actionable_tickets = tickets.get_actionable_tickets_for(reporter)
