@@ -65,18 +65,44 @@ def create_ticket(reporter: str, message: str, department: str, summary: Optiona
 
 def get_open_tickets_for_reporter(reporter: str) -> list[dict]:
     """
-    One reporter's open tickets, oldest first. Used to: (a) tell the
-    classifier whether this sender has a ticket still missing a due date
-    (see CONTEXT_AWAITING_DUE_DATE in app/classifier.py), (b) give it
-    content to match a close_ticket message against by meaning, and (c)
-    decide whether a close or cancel request needs a tap-to-pick picker
-    (see _handle_close_ticket / _handle_cancel_ticket in
-    app/webhook_handler.py).
+    One reporter's own open tickets, oldest first -- used only for the
+    awaiting-due-date signal (see CONTEXT_AWAITING_DUE_DATE in
+    app/classifier.py) and due-date targeting (set_due_date(),
+    cancel_most_recent_missing_due_date_ticket()). Deliberately NOT
+    widened to include the shared car pool (see get_actionable_tickets_for
+    below) -- "did my own ticket-creation flow just ask me a due-date
+    question" is a personal, sequential conversational thread, not
+    something someone else's car ticket lacking a date should trigger.
     """
     conn = get_conn()
     try:
         rows = conn.execute(
             "SELECT * FROM tickets WHERE reporter = ? AND status = 'open' ORDER BY created_at ASC",
+            (reporter,),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_actionable_tickets_for(reporter: str) -> list[dict]:
+    """
+    This reporter's own open tickets, PLUS every open รถ-department ticket
+    regardless of who filed it -- cars are a shared pool either person can
+    close or cancel, everything else stays private to whoever reported it
+    (see close_ticket_by_id / cancel_ticket_by_id, which enforce this same
+    rule at the DB level, not just here). Used to build the classifier's
+    content-matching context and the close/cancel candidate list (single-
+    target shortcut / tap-to-pick picker) in app/webhook_handler.py.
+    """
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM tickets
+            WHERE status = 'open' AND (reporter = ? OR department = 'รถ')
+            ORDER BY created_at ASC
+            """,
             (reporter,),
         ).fetchall()
         return [_row_to_dict(r) for r in rows]
@@ -139,16 +165,19 @@ def most_recent_open_ticket(reporter: str) -> Optional[dict]:
 
 def close_ticket_by_id(ticket_id: int, reporter: str) -> Optional[dict]:
     """
-    Scoped to reporter -- previously this closed any ticket id regardless of
-    who filed it, so one person naming a number could accidentally close
-    the other person's ticket. Content-matched/picker-selected ids (see
-    webhook_handler.py) always come from that reporter's own open tickets
-    already, but an explicitly typed number needs this guard too.
+    Scoped to reporter, EXCEPT รถ-department tickets -- those are a shared
+    pool either person can close regardless of who filed it (see
+    get_actionable_tickets_for). Everything else stays private: an
+    explicitly typed number for a non-car ticket still can't touch the
+    other person's ticket, which is the whole reason this guard exists in
+    the first place -- one person naming a number shouldn't be able to
+    close a report that isn't theirs and isn't shared.
     """
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM tickets WHERE id = ? AND reporter = ? AND status = 'open'", (ticket_id, reporter)
+            "SELECT * FROM tickets WHERE id = ? AND status = 'open' AND (reporter = ? OR department = 'รถ')",
+            (ticket_id, reporter),
         ).fetchone()
         if row is None:
             return None
@@ -167,14 +196,14 @@ def cancel_ticket_by_id(ticket_id: int, reporter: str) -> Optional[dict]:
     just reported). Stored as status='closed' plus cancelled_at set, so it
     drops out of every open-ticket query exactly like a real close does,
     but the dashboard/digests can still tell the two apart and label it
-    accordingly (see app/dashboard.py). Reporter-scoped for the same reason
-    close_ticket_by_id is -- an explicitly typed number shouldn't be able
-    to touch the other person's ticket.
+    accordingly (see app/dashboard.py). Same reporter/รถ-shared-pool scoping
+    as close_ticket_by_id, for the same reason.
     """
     conn = get_conn()
     try:
         row = conn.execute(
-            "SELECT * FROM tickets WHERE id = ? AND reporter = ? AND status = 'open'", (ticket_id, reporter)
+            "SELECT * FROM tickets WHERE id = ? AND status = 'open' AND (reporter = ? OR department = 'รถ')",
+            (ticket_id, reporter),
         ).fetchone()
         if row is None:
             return None

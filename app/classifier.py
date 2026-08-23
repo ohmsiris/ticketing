@@ -197,13 +197,17 @@ a new_ticket if it clearly describes a distinct new problem instead.
 
 def _open_tickets_context(open_tickets: Optional[list]) -> str:
     """
-    Builds the context block listing a person's currently open tickets, so
-    close_ticket can be matched by content ("ปิดงานเปลี่ยนน้ำมัน") instead of
-    requiring an exact id every time -- see the "close_ticket" rule above.
+    Builds the context block listing tickets this sender can act on, so
+    close_ticket/cancel_ticket can be matched by content
+    ("ปิดงานเปลี่ยนน้ำมัน") instead of requiring an exact id every time --
+    see those rules above. This is their own open tickets PLUS the shared
+    รถ-department pool (see get_actionable_tickets_for in tickets.py) --
+    i.e. not strictly "their own" -- so a car ticket the other person filed
+    can legitimately appear and get matched here too.
     """
     if not open_tickets:
         return "\n\nThis person has no open tickets right now."
-    lines = ["\n\nThis person's open tickets (id: description):"]
+    lines = ["\n\nTickets this person can act on (id: description):"]
     for t in open_tickets:
         lines.append(f"#{t['id']}: {t.get('summary') or t['message']}")
     return "\n".join(lines)

@@ -92,14 +92,20 @@ def handle_message_event(event: dict) -> None:
         reply_message(reply_token, [strings.all_open_tickets_digest(tickets.get_all_open_tickets_by_due_date())])
         return
 
-    # Fetched once and reused for two things: (a) tells the classifier when
-    # this sender has a ticket still waiting on a due date, so a short reply
-    # like "อีก2วัน" reads as an answer instead of a new, unrelated ticket,
-    # and (b) gives it content to match a close_ticket message against, and
-    # backs the tap-to-close picker if that match is ambiguous.
+    # awaiting_due_date: is THIS sender's own ticket-creation flow mid a
+    # "when's this due?" question -- a personal, sequential thread, so it
+    # stays scoped to their own tickets only (see get_open_tickets_for_reporter).
+    # actionable_tickets: everything close_ticket/cancel_ticket can act on --
+    # their own tickets, PLUS the shared car pool (any open รถ ticket,
+    # regardless of who filed it) -- fed to the classifier for content-
+    # matching and to the close/cancel handlers for the single-target/
+    # picker logic. Two different lists on purpose: someone else's open
+    # car ticket shouldn't make a short reply read as answering a due-date
+    # question that was never asked of THIS sender.
     open_tickets_for_reporter = tickets.get_open_tickets_for_reporter(reporter)
     awaiting_due_date = any(t["due_date"] is None for t in open_tickets_for_reporter)
-    result = classify(text, awaiting_due_date=awaiting_due_date, open_tickets=open_tickets_for_reporter)
+    actionable_tickets = tickets.get_actionable_tickets_for(reporter)
+    result = classify(text, awaiting_due_date=awaiting_due_date, open_tickets=actionable_tickets)
     intent = result["intent"]
 
     if intent == "new_ticket":
@@ -107,9 +113,9 @@ def handle_message_event(event: dict) -> None:
     elif intent == "due_date_reply":
         _handle_due_date_reply(reporter, result, reply_token)
     elif intent == "close_ticket":
-        _handle_close_ticket(reporter, result, open_tickets_for_reporter, reply_token)
+        _handle_close_ticket(reporter, result, actionable_tickets, reply_token)
     elif intent == "cancel_ticket":
-        _handle_cancel_ticket(reporter, result, open_tickets_for_reporter, awaiting_due_date, reply_token)
+        _handle_cancel_ticket(reporter, result, actionable_tickets, awaiting_due_date, reply_token)
     elif intent == "other":
         # Confidently not a report -- greeting, small talk, an unrelated
         # question. Reply conversationally instead of logging it as a
@@ -204,11 +210,13 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
     )
 
 
-def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter: list[dict], reply_token: str) -> None:
+def _handle_close_ticket(reporter: str, result: dict, actionable_tickets: list[dict], reply_token: str) -> None:
     # An id here can come from an explicit number in the message, or from
-    # the classifier content-matching it against open_tickets_for_reporter
-    # (e.g. "ปิดงานเปลี่ยนน้ำมัน") -- either way, close_ticket_by_id is
-    # reporter-scoped so this can't ever close the other person's ticket.
+    # the classifier content-matching it against actionable_tickets (e.g.
+    # "ปิดงานเปลี่ยนน้ำมัน") -- either way, close_ticket_by_id enforces the
+    # real rule at the DB level: this can close the sender's own tickets,
+    # or any รถ-department ticket (shared pool, any reporter), never
+    # anything else.
     ticket_id = result.get("close_ticket_id")
     if ticket_id is not None:
         ticket = tickets.close_ticket_by_id(ticket_id, reporter)
@@ -218,12 +226,12 @@ def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter:
         reply_message(reply_token, [strings.ticket_closed(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
-    if not open_tickets_for_reporter:
+    if not actionable_tickets:
         reply_message(reply_token, [strings.no_open_ticket_to_close()])
         return
 
     quick_reply = [
-        QuickReplyOption(label=_ticket_picker_label(t), text=f"ปิด #{t['id']}") for t in open_tickets_for_reporter
+        QuickReplyOption(label=_ticket_picker_label(t), text=f"ปิด #{t['id']}") for t in actionable_tickets
     ]
 
     # They described something specific ("ซ่อมมอเตอร์เสร็จแล้ว") but it
@@ -234,10 +242,10 @@ def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter:
         reply_message(reply_token, [strings.close_ticket_no_match_prompt()], quick_reply=quick_reply)
         return
 
-    if len(open_tickets_for_reporter) == 1:
+    if len(actionable_tickets) == 1:
         # Generic close phrase, nothing to match against, and only one
         # candidate -- safe to assume that's the one.
-        ticket = tickets.close_ticket_by_id(open_tickets_for_reporter[0]["id"], reporter)
+        ticket = tickets.close_ticket_by_id(actionable_tickets[0]["id"], reporter)
         reply_message(reply_token, [strings.ticket_closed(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
@@ -249,7 +257,7 @@ def _handle_close_ticket(reporter: str, result: dict, open_tickets_for_reporter:
 def _handle_cancel_ticket(
     reporter: str,
     result: dict,
-    open_tickets_for_reporter: list[dict],
+    actionable_tickets: list[dict],
     awaiting_due_date: bool,
     reply_token: str,
 ) -> None:
@@ -258,9 +266,10 @@ def _handle_cancel_ticket(
     this app, by design (see the cancel_ticket rule in classifier.py: a
     bare cancel word with no number is never "cancel everything", even if
     phrased that way). Shape mirrors _handle_close_ticket: explicit id
-    first, then (new) the awaiting-due-date shortcut, then an unambiguous
-    single-open-ticket case, then a tap-to-cancel picker when there's more
-    than one candidate and nothing to disambiguate by.
+    first, then the awaiting-due-date shortcut (always the sender's own
+    ticket, never a shared car one -- see get_open_tickets_for_reporter),
+    then an unambiguous single-candidate case, then a tap-to-cancel picker
+    when there's more than one and nothing to disambiguate by.
     """
     ticket_id = result.get("cancel_ticket_id")
     if ticket_id is not None:
@@ -285,14 +294,14 @@ def _handle_cancel_ticket(
         # Nothing was actually missing a due date after all -- fall through
         # to the generic path below rather than silently doing nothing.
 
-    if not open_tickets_for_reporter:
+    if not actionable_tickets:
         reply_message(reply_token, [strings.no_open_ticket_to_cancel()])
         return
 
-    if len(open_tickets_for_reporter) == 1:
+    if len(actionable_tickets) == 1:
         # Generic cancel phrase, nothing to disambiguate, only one
         # candidate -- safe to assume that's the one.
-        ticket = tickets.cancel_ticket_by_id(open_tickets_for_reporter[0]["id"], reporter)
+        ticket = tickets.cancel_ticket_by_id(actionable_tickets[0]["id"], reporter)
         reply_message(reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
@@ -300,7 +309,7 @@ def _handle_cancel_ticket(
     # tappable buttons instead of guessing which one they meant. Still only
     # ever cancels the single one they tap.
     quick_reply = [
-        QuickReplyOption(label=_ticket_picker_label(t), text=f"ยกเลิก #{t['id']}") for t in open_tickets_for_reporter
+        QuickReplyOption(label=_ticket_picker_label(t), text=f"ยกเลิก #{t['id']}") for t in actionable_tickets
     ]
     reply_message(reply_token, [strings.cancel_ticket_picker_prompt()], quick_reply=quick_reply)
 
