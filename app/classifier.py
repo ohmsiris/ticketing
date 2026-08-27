@@ -4,7 +4,6 @@ means, instead of trying to pattern-match Thai phrasing ourselves.
 """
 import json
 import logging
-import re
 from datetime import datetime
 from typing import Optional, TypedDict
 from zoneinfo import ZoneInfo
@@ -300,11 +299,18 @@ def _default_classification(awaiting_due_date: bool = False) -> Classification:
 
 def _extract_json(text: str) -> dict:
     # Claude is asked to return raw JSON, but strip code fences defensively
-    # in case it wraps the answer in ```json ... ```.
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
+    # in case it wraps the answer in ```json ... ```. Parse with
+    # raw_decode() from the first '{' rather than a greedy \{.*\} regex --
+    # the regex grabs everything up to the LAST '}' in the whole text, so
+    # any trailing content after the real JSON (a closing ``` fence, a
+    # stray sentence) that itself contains a brace anywhere later on
+    # breaks json.loads with "Extra data". raw_decode() parses just the
+    # first complete JSON value and ignores whatever comes after it.
+    start = text.find("{")
+    if start == -1:
         raise ValueError("no JSON object found in model output")
-    return json.loads(match.group(0))
+    obj, _ = json.JSONDecoder().raw_decode(text, start)
+    return obj
 
 
 def classify(
@@ -360,25 +366,32 @@ def classify(
     try:
         response = _client_lazy().messages.create(
             model=MODEL,
-            # claude-sonnet-5 spends some of this budget on an internal
-            # "thinking" block before the actual JSON answer -- 300 was
-            # nowhere near enough (seen consuming ~200 tokens on ordinary
-            # messages) and silently truncated the response mid-JSON
-            # (stop_reason: "max_tokens"), which _extract_json then failed
-            # to parse -- caught by the except below and defaulted, exactly
-            # like a genuine API failure, on messages that had nothing
-            # actually wrong with them. Confirmed via a raw API call before
-            # raising this. 1024 leaves comfortable headroom for thinking
-            # plus a full answer (summary + banter_reply can both run long).
             max_tokens=1024,
+            # claude-sonnet-5 defaults to spending part of its budget on an
+            # internal "thinking" block before the actual JSON answer, and
+            # that spend is wildly variable -- measured anywhere from ~290
+            # to over 1000 tokens on the SAME ordinary message across
+            # repeated calls. Bumping max_tokens alone (300 -> 1024) still
+            # left a ~37% truncation rate (stop_reason: "max_tokens", cut
+            # off mid-JSON, _extract_json fails, caught below and silently
+            # defaulted -- indistinguishable from a genuine API failure on
+            # messages that had nothing wrong with them). Explicitly
+            # disabling thinking removes the variability at its source:
+            # confirmed reliable across repeated trials, and there's no
+            # accuracy cost for a task this structured -- classification
+            # doesn't need chain-of-thought, just correct extraction. 1024
+            # is now pure headroom for the answer itself (summary/
+            # banter_reply can both run a bit long), never for thinking.
+            thinking={"type": "disabled"},
             system=system,
             messages=messages,
         )
-        # claude-sonnet-5 can return a leading "thinking" content block
-        # before the actual answer, so find the text block by type rather
-        # than assuming content[0] is it (that assumption silently broke
-        # every single classification -- always caught by the except below
-        # and defaulted -- until this was caught via live testing).
+        # Find the text block by type rather than assuming content[0] is it
+        # -- thinking is disabled above so this should always be content[0]
+        # now, but that exact assumption once silently broke every single
+        # classification when a thinking block WAS present (always caught
+        # by the except below and defaulted, until caught via live
+        # testing), so keep the defensive lookup rather than re-earn that.
         text_block = next((b for b in response.content if b.type == "text"), None)
         if text_block is None:
             raise ValueError("no text block in model response")
