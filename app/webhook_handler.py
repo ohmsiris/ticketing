@@ -6,7 +6,7 @@ on its own.
 """
 import logging
 
-from app import bills, conversation, slips, strings, tickets
+from app import bills, conversation, maintenance, slips, strings, tickets
 from app.bill_extraction import extract_bill
 from app.classifier import classify
 from app.config import settings
@@ -124,13 +124,25 @@ def handle_message_event(event: dict) -> None:
     awaiting_due_date = any(t["due_date"] is None for t in open_tickets_for_reporter)
     actionable_tickets = tickets.get_actionable_tickets_for(reporter)
 
+    # Maintenance-completion matching is scoped to Ohm only for now (see
+    # app/maintenance.py's module docstring) -- passing None rather than an
+    # empty list tells the classifier to never use maintenance_done at all
+    # for anyone else, not just "nothing matched".
+    maintenance_tasks = maintenance.get_active_tasks() if reporter == "ohm" else None
+
     # Fetched BEFORE logging this message -- otherwise it'd show up twice
     # (once here, once as the new message classify() is asked to read).
     # See app/conversation.py.
     history = conversation.get_recent_history(reporter)
     conversation.log_turn(reporter, "user", text)
 
-    result = classify(text, awaiting_due_date=awaiting_due_date, open_tickets=actionable_tickets, conversation_history=history)
+    result = classify(
+        text,
+        awaiting_due_date=awaiting_due_date,
+        open_tickets=actionable_tickets,
+        conversation_history=history,
+        maintenance_tasks=maintenance_tasks,
+    )
     intent = result["intent"]
 
     if intent == "new_ticket":
@@ -141,6 +153,8 @@ def handle_message_event(event: dict) -> None:
         _handle_close_ticket(reporter, result, actionable_tickets, reply_token)
     elif intent == "cancel_ticket":
         _handle_cancel_ticket(reporter, result, actionable_tickets, awaiting_due_date, reply_token)
+    elif intent == "maintenance_done":
+        _handle_maintenance_done(reporter, text, result, reply_token)
     elif intent == "other":
         # Confidently not a report -- greeting, small talk, an unrelated
         # question. Reply conversationally instead of logging it as a
@@ -379,6 +393,28 @@ def _handle_cancel_ticket(
         QuickReplyOption(label=_ticket_picker_label(t), text=f"ยกเลิก #{t['id']}") for t in actionable_tickets
     ]
     _reply(reporter, reply_token, [strings.cancel_ticket_picker_prompt()], quick_reply=quick_reply)
+
+
+def _handle_maintenance_done(reporter: str, text: str, result: dict, reply_token: str) -> None:
+    """
+    Logs a completed recurring-maintenance task -- scoped to Ohm only for
+    now (see maintenance_tasks' gating in handle_message_event above, which
+    is why this branch can only ever be reached by him at the moment).
+    maintenance_task_id is always non-null here -- classify() only ever
+    returns this intent when it found a confident catalog match (see the
+    maintenance_done rule in classifier.py).
+    """
+    task_id = result["maintenance_task_id"]
+    task = maintenance.get_task(task_id)
+    if task is None:
+        # Shouldn't happen -- classify() only ever sees ids from the live
+        # active catalog -- but fail safe rather than crash if it somehow
+        # changed between that call and now.
+        _reply(reporter, reply_token, [strings.maintenance_task_not_found()])
+        return
+
+    maintenance.log_completion(task_id, reporter, text)
+    _reply(reporter, reply_token, [strings.maintenance_done_confirmation(task["name"])])
 
 
 def _handle_photo_message(reporter: str, message: dict, is_group: bool, reply_token: str) -> None:

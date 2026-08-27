@@ -25,13 +25,18 @@ The scheduled jobs. All pushed to Ohm only, except #4:
    a developer manually re-syncing. See app/roster_sync.py for the
    parsing + safety-net details. No-op (skipped, not an error) if
    DRIVERS_SHEET_ID isn't configured.
+6. maintenance_due_digest -- once a day at 08:00 Asia/Bangkok, every
+   recurring maintenance task that's due today or overdue (see
+   app/maintenance.py). Like #1/#4, no "already reminded" guard -- keeps
+   re-listing anything still outstanding each day, on purpose, until it's
+   reported done.
 """
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app import roster_sync, strings, tickets
+from app import maintenance, roster_sync, strings, tickets
 from app.config import TIMEZONE, settings
 from app.line_client import push_message
 
@@ -79,6 +84,14 @@ def roster_refresh() -> None:
     roster_sync.refresh_roster()
 
 
+def maintenance_due_digest() -> None:
+    due = maintenance.get_due_tasks()
+    if not due:
+        return  # nothing due or overdue -- skip rather than send an empty list
+    push_message(settings.ohm_line_user_id, [strings.maintenance_due_digest(due)])
+    logger.info("sent maintenance-due digest for %d task(s)", len(due))
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone=TIMEZONE)
     scheduler.add_job(
@@ -105,6 +118,11 @@ def start_scheduler() -> BackgroundScheduler:
         roster_refresh,
         CronTrigger(hour=3, minute=0, timezone=TIMEZONE),
         id="roster_refresh",
+    )
+    scheduler.add_job(
+        maintenance_due_digest,
+        CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
+        id="maintenance_due_digest",
     )
     scheduler.start()
     logger.info("scheduler started (timezone=%s)", TIMEZONE)

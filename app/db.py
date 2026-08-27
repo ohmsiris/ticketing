@@ -132,6 +132,33 @@ CREATE TABLE IF NOT EXISTS slips (
 );
 
 CREATE INDEX IF NOT EXISTS idx_slips_reporter_status ON slips (reporter, status);
+
+-- Preventive-maintenance tracking -- a catalog of recurring equipment tasks
+-- (cleaning, oil changes, checks) each with a cadence, separate from
+-- `tickets` (one-off reported problems). See app/maintenance.py.
+-- `reporter` here is deliberately NOT constrained to ('ohm', 'mom') like
+-- every other table -- scoped to just Ohm for now at the application layer
+-- (see app/webhook_handler.py), but the user was explicit about wanting
+-- this open to more staff later, and a free-text column means that day
+-- needs no schema migration, just an app-layer change.
+CREATE TABLE IF NOT EXISTS maintenance_tasks (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT NOT NULL UNIQUE,  -- e.g. 'ล้างฟรีซ หลอด 1' -- unique so re-seeding is idempotent (INSERT OR IGNORE)
+    category       TEXT NOT NULL,         -- groups related tasks for digest display, e.g. 'Freeze/Cooling', 'Oil Change'
+    interval_days  INTEGER NOT NULL,      -- cadence: 1=daily, 2=every other day, 7=weekly, 30=~monthly, 180=~every 6 months
+    active         INTEGER NOT NULL DEFAULT 1,  -- 0 = retired, kept for history rather than deleted
+    created_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id      INTEGER NOT NULL REFERENCES maintenance_tasks(id),
+    reporter     TEXT NOT NULL,   -- free text on purpose, see table comment above
+    note         TEXT,            -- their original message, for context/audit
+    completed_at TEXT NOT NULL    -- ISO 8601 UTC timestamp
+);
+
+CREATE INDEX IF NOT EXISTS idx_maintenance_log_task_completed ON maintenance_log (task_id, completed_at);
 """
 
 

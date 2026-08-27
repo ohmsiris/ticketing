@@ -29,7 +29,7 @@ def _client_lazy() -> Anthropic:
 
 MODEL = "claude-sonnet-5"
 
-KNOWN_INTENTS = {"new_ticket", "due_date_reply", "close_ticket", "cancel_ticket", "other"}
+KNOWN_INTENTS = {"new_ticket", "due_date_reply", "close_ticket", "cancel_ticket", "maintenance_done", "other"}
 KNOWN_DEPARTMENTS = {"รถ", "เครื่องจักร", "พนักงาน", "อื่นๆ"}
 DEFAULT_DEPARTMENT = "อื่นๆ"
 
@@ -55,7 +55,7 @@ a single JSON object, no markdown fences, no explanation, matching exactly \
 this shape:
 
 {{
-  "intent": "new_ticket" | "due_date_reply" | "close_ticket" | "cancel_ticket" | "other",
+  "intent": "new_ticket" | "due_date_reply" | "close_ticket" | "cancel_ticket" | "maintenance_done" | "other",
   "department": "รถ" | "เครื่องจักร" | "พนักงาน" | "อื่นๆ",
   "summary": "<cleaned-up short version of the issue, or null>",
   "due_date_days": <integer or null>,
@@ -63,11 +63,29 @@ this shape:
   "remind_days_before": <integer or null>,
   "close_ticket_id": <integer or null>,
   "close_specific_no_match": <true or false>,
+  "maintenance_task_id": <integer or null>,
   "cancel_ticket_id": <integer or null>,
   "banter_reply": "<short Thai reply, or null>"
 }}
 
 Rules:
+- "maintenance_done": ONLY when a maintenance task catalog is given in \
+context below -- if none is given, never use this intent no matter what \
+the message says. The message reports completing one of the ROUTINE, \
+SCHEDULED tasks in that catalog (a regular cleaning/oil-change/check that \
+recurs on its own cadence) -- e.g. "เพิ่งล้างฟรีซหลอด 2 เสร็จ", "เป่า \
+คอนเดนเซอร์ตู้แพ็คให้แล้วครับ". No special trigger word is needed -- match \
+by meaning, same as close_ticket. Put the matched task's id in \
+maintenance_task_id. If you're not confident which catalog task it means, \
+or it doesn't match any of them, do NOT use maintenance_done -- classify \
+it as new_ticket or another intent instead, exactly as if no catalog \
+existed; there's no picker/disambiguation flow for this one; unlike \
+close_ticket, guessing wrong here silently marks a routine task done \
+early, which is worse than just not matching. The key distinction from \
+new_ticket: a maintenance_done message reports a routine task from the \
+catalog being done; new_ticket describes a NEW or unusual problem (broken, \
+unexpected, not part of the regular schedule) -- when genuinely unsure \
+which, prefer new_ticket (a report never silently vanishes that way).
 - "new_ticket": the message describes a new problem, issue, or task to \
 track. If it ALSO states a due date/deadline in the same message (e.g. \
 "เปลี่ยนน้ำมันเครื่อง 27/9/69"), extract that date too -- fill \
@@ -205,6 +223,25 @@ def _open_tickets_context(open_tickets: Optional[list]) -> str:
     return "\n".join(lines)
 
 
+def _maintenance_context(maintenance_tasks: Optional[list]) -> str:
+    """
+    Builds the context block listing the recurring-maintenance catalog, so
+    maintenance_done can be matched by content -- see that rule above. When
+    not provided at all (None, not just empty), explicitly tells the model
+    never to use maintenance_done -- this is how the intent stays gated to
+    Ohm only for now (see app/webhook_handler.py, which only passes this in
+    for him) without needing a separate prompt variant.
+    """
+    if maintenance_tasks is None:
+        return "\n\nNo maintenance task catalog is available for this person -- never use maintenance_done."
+    if not maintenance_tasks:
+        return "\n\nThe maintenance task catalog is currently empty -- never use maintenance_done."
+    lines = ["\n\nMaintenance task catalog (id: name [category]):"]
+    for t in maintenance_tasks:
+        lines.append(f"#{t['id']}: {t['name']} [{t['category']}]")
+    return "\n".join(lines)
+
+
 class Classification(TypedDict):
     intent: str
     department: str
@@ -214,6 +251,7 @@ class Classification(TypedDict):
     remind_days_before: Optional[int]
     close_ticket_id: Optional[int]
     close_specific_no_match: bool
+    maintenance_task_id: Optional[int]
     cancel_ticket_id: Optional[int]
     banter_reply: Optional[str]
 
@@ -245,6 +283,7 @@ def _default_classification(awaiting_due_date: bool = False) -> Classification:
         "remind_days_before": None,
         "close_ticket_id": None,
         "close_specific_no_match": False,
+        "maintenance_task_id": None,
         "cancel_ticket_id": None,
         "banter_reply": None,
     }
@@ -264,6 +303,7 @@ def classify(
     awaiting_due_date: bool = False,
     open_tickets: Optional[list] = None,
     conversation_history: Optional[list] = None,
+    maintenance_tasks: Optional[list] = None,
 ) -> Classification:
     """
     Classifies a single incoming text message. Never raises -- on any error,
@@ -291,10 +331,17 @@ def classify(
     prior turns, not summarized into the system prompt, so it can use
     context the way it naturally would in any other conversation instead of
     relying on us to have anticipated and hand-flagged the scenario.
+
+    maintenance_tasks: the recurring-maintenance catalog (list of dicts
+    with at least id/name/category), so a completion report can be matched
+    by content -- see app/maintenance.py. Pass None (not just an empty
+    list) to disable maintenance_done entirely for this call -- that's how
+    the feature stays scoped to Ohm only for now (see app/webhook_handler.py).
     """
     today = datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
     system = SYSTEM_PROMPT.format(today=today, tz=TIMEZONE)
     system += _open_tickets_context(open_tickets)
+    system += _maintenance_context(maintenance_tasks)
 
     messages = [{"role": turn["role"], "content": turn["text"]} for turn in (conversation_history or [])]
     messages.append({"role": "user", "content": message})
@@ -326,6 +373,15 @@ def classify(
             # phantom ticket out of what's likely a pending due-date answer
             intent = "due_date_reply" if awaiting_due_date else "new_ticket"
 
+        maintenance_task_id = parsed.get("maintenance_task_id")
+        if not isinstance(maintenance_task_id, int) or isinstance(maintenance_task_id, bool):
+            maintenance_task_id = None
+        if intent == "maintenance_done" and maintenance_task_id is None:
+            # Contract violation -- the prompt says never return this intent
+            # without a matched id. Don't silently mark some task done out
+            # of a guess; fall back exactly like an unrecognized intent.
+            intent = "due_date_reply" if awaiting_due_date else "new_ticket"
+
         department = parsed.get("department")
         if department not in KNOWN_DEPARTMENTS:
             department = DEFAULT_DEPARTMENT
@@ -353,6 +409,7 @@ def classify(
             "remind_days_before": remind_days_before,
             "close_ticket_id": parsed.get("close_ticket_id"),
             "close_specific_no_match": bool(parsed.get("close_specific_no_match")),
+            "maintenance_task_id": maintenance_task_id,
             "cancel_ticket_id": parsed.get("cancel_ticket_id"),
             "banter_reply": banter_reply,
         }

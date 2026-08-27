@@ -17,7 +17,7 @@ from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from app import tickets
+from app import maintenance, tickets
 from app.bills_routes import router as bills_router
 from app.config import settings
 from app.dashboard import render_tickets_csv, render_tickets_page
@@ -34,6 +34,7 @@ logger = logging.getLogger("ticketing.main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    maintenance.seed_default_tasks()
     scheduler = start_scheduler()
     yield
     scheduler.shutdown(wait=False)

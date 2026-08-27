@@ -179,6 +179,33 @@ def cancel_ticket_picker_prompt() -> str:
     return "จะยกเลิกงานไหนครับ? เลือกจากด้านล่างได้เลย"
 
 
+# --- Preventive maintenance (recurring tasks -- see app/maintenance.py) ---
+
+
+def maintenance_done_confirmation(task_name: str) -> str:
+    return f"✅ บันทึกแล้ว: {task_name}"
+
+
+def maintenance_task_not_found() -> str:
+    return "ไม่พบรายการนี้ในระบบครับ อาจมีการเปลี่ยนแปลงรายการ ลองพิมพ์ใหม่อีกครั้ง"
+
+
+def maintenance_due_digest(tasks: list[dict]) -> str:
+    """tasks: list of dicts with name, category, days_overdue (from
+    maintenance.get_due_tasks) -- grouped by category, most overdue first
+    within each group."""
+    lines = [f"🔧 งานบำรุงรักษาที่ถึงกำหนด {len(tasks)} รายการ:"]
+    by_category: dict[str, list[dict]] = {}
+    for t in tasks:
+        by_category.setdefault(t["category"], []).append(t)
+    for category, group in by_category.items():
+        lines.append(f"\n{category}")
+        for t in group:
+            when = "ถึงกำหนดวันนี้" if t["days_overdue"] == 0 else f"เลยกำหนดมา {t['days_overdue']} วัน"
+            lines.append(f"- {t['name']} ({when})")
+    return "\n".join(lines)
+
+
 # --- Unsupported input ---
 
 
