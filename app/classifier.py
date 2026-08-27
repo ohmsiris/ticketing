@@ -64,6 +64,7 @@ this shape:
   "close_ticket_id": <integer or null>,
   "close_specific_no_match": <true or false>,
   "maintenance_task_id": <integer or null>,
+  "maintenance_completed_days_ago": <integer or null>,
   "cancel_ticket_id": <integer or null>,
   "banter_reply": "<short Thai reply, or null>"
 }}
@@ -85,7 +86,13 @@ early, which is worse than just not matching. The key distinction from \
 new_ticket: a maintenance_done message reports a routine task from the \
 catalog being done; new_ticket describes a NEW or unusual problem (broken, \
 unexpected, not part of the regular schedule) -- when genuinely unsure \
-which, prefer new_ticket (a report never silently vanishes that way).
+which, prefer new_ticket (a report never silently vanishes that way). If \
+they mention WHEN they actually did it and it wasn't today/just now -- \
+"เมื่อวาน" (yesterday), "เมื่อวานซืน" (day before yesterday), "3 วันที่แล้ว" \
+(3 days ago), "อาทิตย์ที่แล้ว" (about a week ago, ~7) -- fill \
+maintenance_completed_days_ago with that many days before today. Leave it \
+null if they don't mention timing, or say something meaning today/just \
+now ("เมื่อกี้", "เมื่อสักครู่", or no time reference at all).
 - "new_ticket": the message describes a new problem, issue, or task to \
 track. If it ALSO states a due date/deadline in the same message (e.g. \
 "เปลี่ยนน้ำมันเครื่อง 27/9/69"), extract that date too -- fill \
@@ -252,6 +259,7 @@ class Classification(TypedDict):
     close_ticket_id: Optional[int]
     close_specific_no_match: bool
     maintenance_task_id: Optional[int]
+    maintenance_completed_days_ago: Optional[int]
     cancel_ticket_id: Optional[int]
     banter_reply: Optional[str]
 
@@ -284,6 +292,7 @@ def _default_classification(awaiting_due_date: bool = False) -> Classification:
         "close_ticket_id": None,
         "close_specific_no_match": False,
         "maintenance_task_id": None,
+        "maintenance_completed_days_ago": None,
         "cancel_ticket_id": None,
         "banter_reply": None,
     }
@@ -382,6 +391,12 @@ def classify(
             # of a guess; fall back exactly like an unrecognized intent.
             intent = "due_date_reply" if awaiting_due_date else "new_ticket"
 
+        maintenance_completed_days_ago = parsed.get("maintenance_completed_days_ago")
+        if not isinstance(maintenance_completed_days_ago, int) or isinstance(maintenance_completed_days_ago, bool):
+            maintenance_completed_days_ago = None
+        elif maintenance_completed_days_ago <= 0 or maintenance_completed_days_ago > 365:
+            maintenance_completed_days_ago = None  # 0/negative/absurdly-large isn't meaningful as "days ago"
+
         department = parsed.get("department")
         if department not in KNOWN_DEPARTMENTS:
             department = DEFAULT_DEPARTMENT
@@ -410,6 +425,7 @@ def classify(
             "close_ticket_id": parsed.get("close_ticket_id"),
             "close_specific_no_match": bool(parsed.get("close_specific_no_match")),
             "maintenance_task_id": maintenance_task_id,
+            "maintenance_completed_days_ago": maintenance_completed_days_ago,
             "cancel_ticket_id": parsed.get("cancel_ticket_id"),
             "banter_reply": banter_reply,
         }

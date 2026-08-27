@@ -192,16 +192,32 @@ def get_task(task_id: int) -> Optional[dict]:
         conn.close()
 
 
-def log_completion(task_id: int, reporter: str, note: str) -> None:
+def log_completion(task_id: int, reporter: str, note: str, completed_at: Optional[str] = None) -> None:
+    """
+    completed_at: ISO 8601 UTC timestamp to backdate the completion to
+    (e.g. someone reporting today that they actually did it yesterday --
+    see days_ago_to_iso() below). Defaults to right now if not given. This
+    is what get_due_tasks() anchors its next-due math on, so a backdated
+    report correctly shifts the next reminder earlier instead of the app
+    thinking the cadence restarted from today.
+    """
     conn = get_conn()
     try:
         conn.execute(
             "INSERT INTO maintenance_log (task_id, reporter, note, completed_at) VALUES (?, ?, ?, ?)",
-            (task_id, reporter, note, _utc_now_iso()),
+            (task_id, reporter, note, completed_at or _utc_now_iso()),
         )
         conn.commit()
     finally:
         conn.close()
+
+
+def days_ago_to_iso(days_ago: Optional[int]) -> Optional[str]:
+    """Turns classify()'s maintenance_completed_days_ago into an ISO UTC
+    timestamp for log_completion(), or None (meaning "now") if not given."""
+    if not days_ago:
+        return None
+    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
 
 
 def get_due_tasks(lookahead_days: int = 0) -> list[dict]:
