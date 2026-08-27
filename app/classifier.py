@@ -360,7 +360,17 @@ def classify(
     try:
         response = _client_lazy().messages.create(
             model=MODEL,
-            max_tokens=300,
+            # claude-sonnet-5 spends some of this budget on an internal
+            # "thinking" block before the actual JSON answer -- 300 was
+            # nowhere near enough (seen consuming ~200 tokens on ordinary
+            # messages) and silently truncated the response mid-JSON
+            # (stop_reason: "max_tokens"), which _extract_json then failed
+            # to parse -- caught by the except below and defaulted, exactly
+            # like a genuine API failure, on messages that had nothing
+            # actually wrong with them. Confirmed via a raw API call before
+            # raising this. 1024 leaves comfortable headroom for thinking
+            # plus a full answer (summary + banter_reply can both run long).
+            max_tokens=1024,
             system=system,
             messages=messages,
         )
