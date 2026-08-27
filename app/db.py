@@ -143,9 +143,13 @@ CREATE INDEX IF NOT EXISTS idx_slips_reporter_status ON slips (reporter, status)
 -- needs no schema migration, just an app-layer change.
 CREATE TABLE IF NOT EXISTS maintenance_tasks (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    name           TEXT NOT NULL UNIQUE,  -- e.g. 'ล้างฟรีซ หลอด 1' -- unique so re-seeding is idempotent (INSERT OR IGNORE)
-    category       TEXT NOT NULL,         -- groups related tasks for digest display, e.g. 'Freeze/Cooling', 'Oil Change'
-    interval_days  INTEGER NOT NULL,      -- cadence: 1=daily, 2=every other day, 7=weekly, 30=~monthly, 180=~every 6 months
+    name           TEXT NOT NULL UNIQUE,  -- e.g. 'ล้างฟรีซ หลอดใหญ่ 50 ตัน เครื่อง 1' -- unique so seed_default_tasks() can sync by name
+    category       TEXT NOT NULL,         -- groups related tasks for digest display, e.g. 'Freezer', 'Oil Change'
+    interval_days  INTEGER NOT NULL,      -- cadence in days: 1=daily, 7=weekly, 30=monthly, 90=every 3mo, 180=every 6mo.
+                                           -- 0 is a real, deliberate value: "condition-triggered, no fixed cadence" (e.g.
+                                           -- vacuum-freeze cleaning -- done when ice output drops, not on a schedule).
+                                           -- Completions still log normally; get_due_tasks() just never surfaces these.
+    notes          TEXT,                  -- free-text context from the user (e.g. who actually does this, real-world caveats)
     active         INTEGER NOT NULL DEFAULT 1,  -- 0 = retired, kept for history rather than deleted
     created_at     TEXT NOT NULL
 );
@@ -203,3 +207,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE bills ADD COLUMN vehicle_license_province TEXT")
     if "vehicle_match_warning" not in bill_columns:
         conn.execute("ALTER TABLE bills ADD COLUMN vehicle_match_warning TEXT")
+
+    maint_columns = {row["name"] for row in conn.execute("PRAGMA table_info(maintenance_tasks)").fetchall()}
+    if "notes" not in maint_columns:
+        conn.execute("ALTER TABLE maintenance_tasks ADD COLUMN notes TEXT")

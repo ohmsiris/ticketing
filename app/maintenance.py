@@ -6,93 +6,121 @@ plain language, the classifier matches it against the catalog by meaning
 (see app/classifier.py), and a daily job reminds when a task's next-due
 date (last completion + its interval) arrives -- see app/jobs.py.
 
-DEFAULT_TASKS is seeded from the user's real paper maintenance sheets
-(C:\\FD\\Saraburi\\Forms\\Maintenence\\To Print\\Saraburi Maintenence
-Sheets.xlsx, 2026-08-27) -- that workbook is a reference for what
-maintenance the company does and how often, not a format to replicate
-cell-for-cell. Expect more tasks to be added later; seed_default_tasks()
-is idempotent (INSERT OR IGNORE keyed by name) so re-running it (e.g. on
-every app startup) never duplicates or overwrites an existing task, and
-adding a brand new one here just means it appears on the next deploy.
+DEFAULT_TASKS was originally seeded from the user's paper maintenance
+sheets (C:\\FD\\Saraburi\\Forms\\Maintenence\\To Print\\Saraburi
+Maintenence Sheets.xlsx), then corrected by the user directly against a
+generated review spreadsheet (Maintenance_Cycle_Review.xlsx ->
+_V2.xlsx, 2026-08-27) -- cadences, task names (several needed tube-size
+detail, e.g. 50-ton vs 30-ton), categories (Freeze/Cooling split into
+separate Freezer and Cooling Tower categories), and a whole new task type
+(แวคคั่มฟรีซ -- vacuum-freeze cleaning) that isn't on a fixed schedule at
+all, triggered instead by observed ice output dropping. That workbook
+round-trip is a reference for what maintenance the company does and how
+often, not a format to replicate cell-for-cell, and the user was explicit
+that more tasks exist beyond it -- expect this list to keep growing.
 
-Cadences approximate calendar semantics as a fixed day count (30 for
-"monthly", 180 for "every 6 months") rather than tracking actual calendar
-months -- a deliberate simplification for a first version; worth revisiting
-if the drift ever matters in practice.
+seed_default_tasks() does a real SYNC against DEFAULT_TASKS (matched by
+name), not just an idempotent insert -- see its docstring for why that
+distinction matters given the catalog gets corrected over time.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.db import get_conn
 
-# (name, category, interval_days)
-DEFAULT_TASKS: list[tuple[str, str, int]] = [
-    # --- Freeze/Cooling -- monthly, per tube + per bag-ice compressor ---
-    ("ล้างฟรีซ หลอด 1", "Freeze/Cooling", 30),
-    ("ล้างฟรีซ หลอด 2", "Freeze/Cooling", 30),
-    ("ล้างฟรีซ หลอด 3", "Freeze/Cooling", 30),
-    ("ล้างฟรีซ หลอด 4", "Freeze/Cooling", 30),
-    ("ล้างฟรีซ หลอด 5", "Freeze/Cooling", 30),
-    ("ล้างคูลลิ่ง หลอด 1", "Freeze/Cooling", 30),
-    ("ล้างคูลลิ่ง หลอด 2", "Freeze/Cooling", 30),
-    ("ล้างคูลลิ่ง หลอด 3", "Freeze/Cooling", 30),
-    ("ล้างคูลลิ่ง หลอด 4", "Freeze/Cooling", 30),
-    ("ล้างคูลลิ่ง หลอด 5", "Freeze/Cooling", 30),
-    ("ล้างซอง MYCOM", "Freeze/Cooling", 30),
-    ("ล้างซอง SABROE", "Freeze/Cooling", 30),
-    # --- Condenser -- monthly, per tube + per bag-ice compressor ---
-    ("ล้างคอนเดนเซอร์ หลอด 1", "Condenser", 30),
-    ("ล้างคอนเดนเซอร์ หลอด 2", "Condenser", 30),
-    ("ล้างคอนเดนเซอร์ หลอด 3", "Condenser", 30),
-    ("ล้างคอนเดนเซอร์ หลอด 4", "Condenser", 30),
-    ("ล้างคอนเดนเซอร์ หลอด 5", "Condenser", 30),
-    ("ล้างคอนเดนเซอร์ซอง MYCOM", "Condenser", 30),
-    ("ล้างคอนเดนเซอร์ซอง SABROE", "Condenser", 30),
-    # --- Oil Change -- monthly per the sheet's own recording cadence ---
-    ("ถ่ายน้ำมันเครื่อง หลอด 1", "Oil Change", 30),
-    ("ถ่ายน้ำมันเครื่อง หลอด 2", "Oil Change", 30),
-    ("ถ่ายน้ำมันเครื่อง หลอด 3", "Oil Change", 30),
-    ("ถ่ายน้ำมันเครื่อง หลอด 4", "Oil Change", 30),
-    ("ถ่ายน้ำมันเครื่อง หลอด 5", "Oil Change", 30),
-    ("ถ่ายน้ำมันเครื่องซอง MYCOM", "Oil Change", 30),
-    ("ถ่ายน้ำมันเครื่องซอง SABROE", "Oil Change", 30),
-    ("ถ่ายน้ำมันปั๊มลม กรองบ่อซอง", "Oil Change", 30),
-    ("ถ่ายน้ำมันปั๊มลม แป๊ปลม", "Oil Change", 30),
-    ("ถ่ายน้ำมันปั๊มลม ห้องช่าง", "Oil Change", 30),
-    # --- Cold Room Compressor -- oil every 6mo, condenser blow monthly, x3 cabinet types ---
-    ("เปลี่ยนน้ำมันคอมเพรสเซอร์ ตู้บน (พัดลมเดี่ยว)", "Cold Room Compressor", 180),
-    ("เป่าคอนเดนเซอร์ ตู้บน (พัดลมเดี่ยว)", "Cold Room Compressor", 30),
-    ("เปลี่ยนน้ำมันคอมเพรสเซอร์ ตู้บน (พัดลมคู่)", "Cold Room Compressor", 180),
-    ("เป่าคอนเดนเซอร์ ตู้บน (พัดลมคู่)", "Cold Room Compressor", 30),
-    ("เปลี่ยนน้ำมันคอมเพรสเซอร์ ตู้แพ็ค", "Cold Room Compressor", 180),
-    ("เป่าคอนเดนเซอร์ ตู้แพ็ค", "Cold Room Compressor", 30),
-    # --- Sediment Pond ---
-    ("ระบายน้ำบ่อตกตะกอน", "Sediment Pond", 2),
-    ("ทำความสะอาดด้านในบ่อตกตะกอน", "Sediment Pond", 30),
-    # --- y-strainer ---
-    ("ล้างวายสแตนเนอร์", "y-strainer", 30),
-    # --- Cold Room Cleaning -- monthly, x3 room types ---
-    ("ทำความสะอาดห้องเย็นตู้บน", "Cold Room Cleaning", 30),
-    ("ทำความสะอาดห้องเย็นตู้ล่าง", "Cold Room Cleaning", 30),
-    ("ทำความสะอาดห้องเย็นตู้แพ็ค", "Cold Room Cleaning", 30),
-    # --- Chlorine Check -- daily, x4 checkpoints ---
-    ("ตรวจ Chlorine อ่างล้างเท้า บ่อซอง", "Chlorine Check", 1),
-    ("ตรวจ Chlorine อ่างล้างเท้า เครื่อง 1-2", "Chlorine Check", 1),
-    ("ตรวจ Chlorine อ่างล้างเท้า เครื่อง 3-4", "Chlorine Check", 1),
-    ("ตรวจ Chlorine อ่างล้างกระสอบ", "Chlorine Check", 1),
-    # --- Water QC -- daily, one combined check (Chlorine/TDS/hardness/pH together) ---
-    ("ตรวจน้ำผลิต (Chlorine/สารละลายรวม/ความกระด้าง/PH)", "Water QC", 1),
-    # --- FOH Cleaning -- daily/weekly/monthly per the checklist ---
-    ("ทำความสะอาดพื้นลานด้านหน้า", "FOH Cleaning", 1),
-    ("ทำความสะอาดพื้นไลน์ผลิตน้ำแข็ง", "FOH Cleaning", 1),
-    ("ทำความสะอาดห้องน้ำพนักงาน", "FOH Cleaning", 1),
-    ("ทำความสะอาดอ่างล้างเท้า (หน้าโรง)", "FOH Cleaning", 1),
-    ("ทำความสะอาดอ่างล้างกระสอบ (หน้าโรง)", "FOH Cleaning", 1),
-    ("เติมคลอรีน 4 จุด", "FOH Cleaning", 1),
-    ("ทำความสะอาดม่าน", "FOH Cleaning", 7),
-    ("ทำความสะอาดผนัง", "FOH Cleaning", 7),
-    ("ทำความสะอาดบ่อจุ่มซอง", "FOH Cleaning", 7),
-    ("ตรวจสอบถังดับเพลิง", "FOH Cleaning", 30),
+# interval_days: cadence in days (1=daily, 7=weekly, 30=monthly, 90=every
+# 3mo, 180=every 6mo). 0 is a real, deliberate value meaning "condition-
+# triggered, no fixed cadence" -- completions still log normally, but
+# get_due_tasks() never surfaces these in the reminder digest.
+DEFAULT_TASKS: list[dict] = [
+    # --- Freezer -- tube cleaning, corrected to every 3 months (was a
+    # monthly guess); user's note: check quarterly for scale buildup, but
+    # actual cleaning is usually more like every 6 months ---
+    *[
+        {
+            "name": f"ล้างฟรีซ {size} เครื่อง {n}",
+            "category": "Freezer",
+            "interval_days": 90,
+            "notes": "Check every 3 months and see if any calc has built up on the sides of the tube. "
+            "No need to do every three months, real maintenance is usually around 6 months.",
+        }
+        for n, size in [(1, "หลอดใหญ่ 50 ตัน"), (2, "หลอดใหญ่ 50 ตัน"), (3, "หลอดใหญ่ 50 ตัน"),
+                        (4, "หลอดเล็ก 30 ตัน"), (5, "หลอดใหญ่ 50 ตัน")]
+    ],
+    # --- Cooling Tower -- split out from Freezer as its own category ---
+    *[
+        {"name": f"ล้างคูลลิ่ง {size} เครื่อง {n}", "category": "Cooling Tower", "interval_days": 90, "notes": None}
+        for n, size in [(1, "หลอดใหญ่ 50 ตัน"), (2, "หลอดใหญ่ 50 ตัน"), (3, "หลอดใหญ่ 50 ตัน"),
+                        (4, "หลอดเล็ก 30 ตัน"), (5, "หลอดใหญ่ 50 ตัน")]
+    ],
+    {"name": "ล้างคูลลิ่ง ซอง 30 ตัน MYCOM", "category": "Cooling Tower", "interval_days": 90, "notes": None},
+    {"name": "ล้างคูลลิ่ง ซอง 30 ตัน SABROE", "category": "Cooling Tower", "interval_days": 90, "notes": None},
+    # --- Condenser -- corrected to every 6 months (was a monthly guess) ---
+    *[
+        {"name": f"ล้างคอนเดนเซอร์ {size} เครื่อง {n}", "category": "Condenser", "interval_days": 180, "notes": None}
+        for n, size in [(1, "หลอดใหญ่ 50 ตัน"), (2, "หลอดใหญ่ 50 ตัน"), (3, "หลอดใหญ่ 50 ตัน"),
+                        (4, "หลอดเล็ก 30 ตัน"), (5, "หลอดใหญ่ 50 ตัน")]
+    ],
+    {"name": "ล้างคอนเดนเซอร์ ซอง 30 ตัน MYCOM", "category": "Condenser", "interval_days": 180, "notes": None},
+    {"name": "ล้างคอนเดนเซอร์ ซอง 30 ตัน SABROE", "category": "Condenser", "interval_days": 180, "notes": None},
+    # --- Freezer (vacuum) -- NEW, condition-triggered, not on a schedule ---
+    *[
+        {
+            "name": f"แวคคั่มฟรีซ {size} เครื่อง {n}",
+            "category": "Freezer",
+            "interval_days": 0,
+            "notes": "Depends if the freezer is producing less than normal amount of ice per cycle.",
+        }
+        for n, size in [(1, "หลอดใหญ่ 50 ตัน"), (2, "หลอดใหญ่ 50 ตัน"), (3, "หลอดใหญ่ 50 ตัน"),
+                        (4, "หลอดเล็ก 30 ตัน"), (5, "หลอดใหญ่ 50 ตัน")]
+    ],
+    # --- Oil Change -- corrected to every 6 months (was a monthly guess) ---
+    *[
+        {"name": f"ถ่ายน้ำมันเครื่อง {size} เครื่อง {n}", "category": "Oil Change", "interval_days": 180, "notes": None}
+        for n, size in [(1, "หลอดใหญ่ 50 ตัน"), (2, "หลอดใหญ่ 50 ตัน"), (3, "หลอดใหญ่ 50 ตัน"),
+                        (4, "หลอดเล็ก 30 ตัน"), (5, "หลอดใหญ่ 50 ตัน")]
+    ],
+    {"name": "ถ่ายน้ำมันเครื่อง ซอง 30 ตัน MYCOM", "category": "Oil Change", "interval_days": 180, "notes": None},
+    {"name": "ถ่ายน้ำมันเครื่อง ซอง 30 ตัน SABROE", "category": "Oil Change", "interval_days": 180, "notes": None},
+    {"name": "ถ่ายน้ำมันปั๊มลม กรองบ่อซอง", "category": "Oil Change", "interval_days": 180, "notes": None},
+    {"name": "ถ่ายน้ำมันปั๊มลม แป๊ปลม", "category": "Oil Change", "interval_days": 180, "notes": None},
+    {"name": "ถ่ายน้ำมันปั๊มลม ห้องช่าง", "category": "Oil Change", "interval_days": 180, "notes": None},
+    # --- Cold Room Compressor -- confirmed as originally guessed ---
+    {"name": "เปลี่ยนน้ำมันคอมเพรสเซอร์ ตู้บน (พัดลมเดี่ยว)", "category": "Cold Room Compressor", "interval_days": 180, "notes": None},
+    {"name": "เป่าคอนเดนเซอร์ ตู้บน (พัดลมเดี่ยว)", "category": "Cold Room Compressor", "interval_days": 30, "notes": None},
+    {"name": "เปลี่ยนน้ำมันคอมเพรสเซอร์ ตู้บน (พัดลมคู่)", "category": "Cold Room Compressor", "interval_days": 180, "notes": None},
+    {"name": "เป่าคอนเดนเซอร์ ตู้บน (พัดลมคู่)", "category": "Cold Room Compressor", "interval_days": 30, "notes": None},
+    {"name": "เปลี่ยนน้ำมันคอมเพรสเซอร์ ตู้แพ็ค", "category": "Cold Room Compressor", "interval_days": 180, "notes": None},
+    {"name": "เป่าคอนเดนเซอร์ ตู้แพ็ค", "category": "Cold Room Compressor", "interval_days": 30, "notes": None},
+    # --- Sediment Pond -- drain corrected to daily (was every-2-days guess) ---
+    {"name": "ระบายน้ำบ่อตกตะกอน", "category": "Sediment Pond", "interval_days": 1, "notes": None},
+    {"name": "ทำความสะอาดด้านในบ่อตกตะกอน", "category": "Sediment Pond", "interval_days": 30, "notes": None},
+    # --- y-strainer -- corrected to weekly (was a monthly guess) ---
+    {"name": "ล้างวายสแตนเนอร์", "category": "y-strainer", "interval_days": 7, "notes": None},
+    # --- Cold Room Cleaning -- corrected to weekly (was a monthly guess);
+    # done by FOH bookkeepers, not necessarily Ohm directly ---
+    {"name": "ทำความสะอาดห้องเย็นตู้บน", "category": "Cold Room Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ทำความสะอาดห้องเย็นตู้ล่าง", "category": "Cold Room Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ทำความสะอาดห้องเย็นตู้แพ็ค", "category": "Cold Room Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
+    # --- Chlorine Check -- confirmed daily; FOH bookkeepers ---
+    {"name": "ตรวจ Chlorine อ่างล้างเท้า บ่อซอง", "category": "Chlorine Check", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ตรวจ Chlorine อ่างล้างเท้า เครื่อง 1-2", "category": "Chlorine Check", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ตรวจ Chlorine อ่างล้างเท้า เครื่อง 3-4", "category": "Chlorine Check", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ตรวจ Chlorine อ่างล้างกระสอบ", "category": "Chlorine Check", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    # --- Water QC -- confirmed daily; FOH bookkeepers ---
+    {"name": "ตรวจน้ำผลิต (Chlorine/สารละลายรวม/ความกระด้าง/PH)", "category": "Water QC", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    # --- FOH Cleaning -- daily/weekly/monthly confirmed as originally
+    # guessed; FOH bookkeepers except the fire extinguisher check ---
+    {"name": "ทำความสะอาดพื้นลานด้านหน้า", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ทำความสะอาดพื้นไลน์ผลิตน้ำแข็ง", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ทำความสะอาดห้องน้ำพนักงาน", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ทำความสะอาดอ่างล้างเท้า (หน้าโรง)", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ทำความสะอาดอ่างล้างกระสอบ (หน้าโรง)", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "เติมคลอรีน 4 จุด", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ทำความสะอาดม่าน", "category": "FOH Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ทำความสะอาดผนัง", "category": "FOH Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ทำความสะอาดบ่อจุ่มซอง", "category": "FOH Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
+    {"name": "ตรวจสอบถังดับเพลิง", "category": "FOH Cleaning", "interval_days": 30, "notes": None},
 ]
 
 
@@ -105,14 +133,40 @@ def _row_to_dict(row) -> dict:
 
 
 def seed_default_tasks() -> None:
-    """Idempotent -- safe to call on every startup (see main.py's lifespan)."""
+    """
+    Syncs maintenance_tasks to DEFAULT_TASKS exactly, matched by name:
+    updates category/interval_days/notes for tasks that already exist,
+    inserts ones that don't, and deactivates (active=0, never deleted --
+    preserves any already-logged completions via the foreign key) any
+    task no longer in DEFAULT_TASKS. This is a real sync rather than a
+    plain idempotent insert on purpose -- the catalog gets corrected over
+    time (task names themselves can change, e.g. gaining tube-size detail),
+    and old wrong rows shouldn't just accumulate alongside the fixed ones.
+    Safe to call on every startup; a no-op once the catalog already matches.
+    """
     conn = get_conn()
     try:
         now = _utc_now_iso()
-        conn.executemany(
-            "INSERT OR IGNORE INTO maintenance_tasks (name, category, interval_days, created_at) VALUES (?, ?, ?, ?)",
-            [(name, category, interval, now) for name, category, interval in DEFAULT_TASKS],
-        )
+        current_names = {row["name"] for row in conn.execute("SELECT name FROM maintenance_tasks").fetchall()}
+        default_names = {t["name"] for t in DEFAULT_TASKS}
+
+        for t in DEFAULT_TASKS:
+            if t["name"] in current_names:
+                conn.execute(
+                    "UPDATE maintenance_tasks SET category = ?, interval_days = ?, notes = ?, active = 1 WHERE name = ?",
+                    (t["category"], t["interval_days"], t["notes"], t["name"]),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO maintenance_tasks (name, category, interval_days, notes, active, created_at) "
+                    "VALUES (?, ?, ?, ?, 1, ?)",
+                    (t["name"], t["category"], t["interval_days"], t["notes"], now),
+                )
+
+        retired = current_names - default_names
+        if retired:
+            conn.executemany("UPDATE maintenance_tasks SET active = 0 WHERE name = ?", [(n,) for n in retired])
+
         conn.commit()
     finally:
         conn.close()
@@ -152,7 +206,10 @@ def log_completion(task_id: int, reporter: str, note: str) -> None:
 
 def get_due_tasks(lookahead_days: int = 0) -> list[dict]:
     """
-    Active tasks whose next-due date (last completion + interval_days, or
+    Active, SCHEDULED tasks (interval_days > 0 -- condition-triggered ones
+    like vacuum-freeze cleaning are never included here, however overdue
+    their last completion looks, since there's no real "due date" to judge
+    them against) whose next-due date (last completion + interval_days, or
     created_at + interval_days if never completed) is today or earlier,
     plus `lookahead_days` -- 0 means "due today or overdue only". Each
     result is annotated with last_completed_at (None if never done) and
@@ -167,7 +224,7 @@ def get_due_tasks(lookahead_days: int = 0) -> list[dict]:
             SELECT t.*, MAX(l.completed_at) AS last_completed_at
             FROM maintenance_tasks t
             LEFT JOIN maintenance_log l ON l.task_id = t.id
-            WHERE t.active = 1
+            WHERE t.active = 1 AND t.interval_days > 0
             GROUP BY t.id
             """
         ).fetchall()
