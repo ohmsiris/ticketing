@@ -37,6 +37,23 @@ CREATE TABLE IF NOT EXISTS user_state (
     ticket_count INTEGER NOT NULL DEFAULT 0
 );
 
+-- Short-term conversation memory per reporter, so the classifier can read
+-- actual recent context instead of relying entirely on hand-built signal
+-- flags for every scenario. See app/conversation.py + classifier.py's use
+-- of this in classify(). Only the classify()-driven ticket flow logs here
+-- (new_ticket/due_date_reply/close_ticket/cancel_ticket/other) -- the
+-- separate photo/bill/slip flow and the digest/HQ-notification pushes are
+-- deliberately not part of this conversational thread.
+CREATE TABLE IF NOT EXISTS conversation_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter   TEXT NOT NULL CHECK (reporter IN ('ohm', 'mom')),
+    role       TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    text       TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_log_reporter_created ON conversation_log (reporter, created_at);
+
 -- Bill tracking (separate concern from tickets -- a photographed repair
 -- bill or an internal mechanic's PM log, not a text-message report).
 -- Text-ish numeric fields (mileage, total_cost, quantity, unit_price, cost)

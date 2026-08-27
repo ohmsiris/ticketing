@@ -73,8 +73,8 @@ def create_ticket(reporter: str, message: str, department: str, summary: Optiona
 def get_open_tickets_for_reporter(reporter: str) -> list[dict]:
     """
     One reporter's own open tickets, oldest first -- used only for the
-    awaiting-due-date signal (see CONTEXT_AWAITING_DUE_DATE in
-    app/classifier.py) and due-date targeting (set_due_date(),
+    awaiting-due-date signal (the deterministic fallback default in
+    classify(), see app/classifier.py) and due-date targeting (set_due_date(),
     cancel_most_recent_missing_due_date_ticket()). Deliberately NOT
     widened to include the shared pool (see get_actionable_tickets_for
     below) -- "did my own ticket-creation flow just ask me a due-date
@@ -229,10 +229,10 @@ def cancel_most_recent_missing_due_date_ticket(reporter: str) -> Optional[dict]:
     Same targeting as set_due_date() -- the reporter's most recently
     created open ticket that's still missing a due date -- but cancels it
     instead of setting one. Used when someone answers the "when's this
-    due?" prompt with a cancellation rather than a date (see
-    CONTEXT_AWAITING_DUE_DATE in app/classifier.py): unambiguous by
-    construction, so no picker is needed the way a generic cancel request
-    might (see _handle_cancel_ticket in app/webhook_handler.py).
+    due?" prompt with a cancellation rather than a date (the classifier
+    reads this from actual conversation history now, see app/classifier.py):
+    unambiguous by construction, so no picker is needed the way a generic
+    cancel request might (see _handle_cancel_ticket in app/webhook_handler.py).
     """
     conn = get_conn()
     try:

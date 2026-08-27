@@ -6,7 +6,7 @@ on its own.
 """
 import logging
 
-from app import bills, slips, strings, tickets
+from app import bills, conversation, slips, strings, tickets
 from app.bill_extraction import extract_bill
 from app.classifier import classify
 from app.config import settings
@@ -25,6 +25,21 @@ def resolve_reporter(line_user_id: str) -> str | None:
     if line_user_id == settings.mom_line_user_id:
         return "mom"
     return None
+
+
+def _reply(reporter: str, reply_token: str, texts: list[str], quick_reply: list[QuickReplyOption] | None = None) -> None:
+    """
+    Wraps line_client.reply_message to also log the bot's reply into
+    conversation history (see app/conversation.py), so the NEXT message
+    from this sender gets real context instead of us hand-flagging it.
+    Use this instead of calling reply_message directly anywhere in the
+    classify()-driven ticket flow (new_ticket/due_date_reply/close_ticket/
+    cancel_ticket/other). The separate photo/bill/slip flow and HQ
+    real-time notifications deliberately don't use this -- see
+    app/conversation.py's module docstring for why.
+    """
+    reply_message(reply_token, texts, quick_reply=quick_reply)
+    conversation.log_turn(reporter, "assistant", "\n".join(texts))
 
 
 def handle_follow_event(event: dict) -> None:
@@ -108,7 +123,14 @@ def handle_message_event(event: dict) -> None:
     open_tickets_for_reporter = tickets.get_open_tickets_for_reporter(reporter)
     awaiting_due_date = any(t["due_date"] is None for t in open_tickets_for_reporter)
     actionable_tickets = tickets.get_actionable_tickets_for(reporter)
-    result = classify(text, awaiting_due_date=awaiting_due_date, open_tickets=actionable_tickets)
+
+    # Fetched BEFORE logging this message -- otherwise it'd show up twice
+    # (once here, once as the new message classify() is asked to read).
+    # See app/conversation.py.
+    history = conversation.get_recent_history(reporter)
+    conversation.log_turn(reporter, "user", text)
+
+    result = classify(text, awaiting_due_date=awaiting_due_date, open_tickets=actionable_tickets, conversation_history=history)
     intent = result["intent"]
 
     if intent == "new_ticket":
@@ -128,7 +150,7 @@ def handle_message_event(event: dict) -> None:
         # never gets silently dropped here. banter_reply is the
         # classifier's own short, warm reply to what they actually said;
         # falls back to a static line if it's missing for any reason.
-        reply_message(reply_token, [result.get("banter_reply") or strings.unclear_message()])
+        _reply(reporter, reply_token, [result.get("banter_reply") or strings.unclear_message()])
     else:
         # Should be unreachable -- classify() only ever returns one of the
         # branches above. Kept as a safety net in case that contract ever
@@ -182,7 +204,7 @@ def _handle_new_ticket(reporter: str, text: str, result: dict, reply_token: str)
         tip = strings.onboarding_first_ticket() if ticket_count == 1 else strings.onboarding_reminder_tip()
         reply_texts[0] = f"{reply_texts[0]}\n{tip}"
 
-    reply_message(reply_token, reply_texts)
+    _reply(reporter, reply_token, reply_texts)
 
 
 def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> None:
@@ -196,7 +218,7 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
         if remind_days_before is not None:
             ticket = tickets.most_recent_open_ticket(reporter)
             if ticket is None:
-                reply_message(reply_token, [strings.no_ticket_for_reminder()])
+                _reply(reporter, reply_token, [strings.no_ticket_for_reminder()])
                 return
             tickets.set_remind_days_before(ticket["id"], remind_days_before)
             display_text = ticket["summary"] or ticket["message"]
@@ -205,19 +227,19 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
                     settings.ohm_line_user_id,
                     [strings.remind_days_before_set_notify_hq(ticket["id"], reporter, display_text, remind_days_before)],
                 )
-            reply_message(reply_token, [strings.remind_days_before_set(ticket["id"], display_text, remind_days_before)])
+            _reply(reporter, reply_token, [strings.remind_days_before_set(ticket["id"], display_text, remind_days_before)])
             return
 
-        reply_message(reply_token, [strings.due_date_unclear()])
+        _reply(reporter, reply_token, [strings.due_date_unclear()])
         return
 
     if tickets.is_past_date(due_date):
-        reply_message(reply_token, [strings.due_date_in_past(due_date)])
+        _reply(reporter, reply_token, [strings.due_date_in_past(due_date)])
         return
 
     ticket = tickets.set_due_date(reporter, due_date)
     if ticket is None:
-        reply_message(reply_token, [strings.no_ticket_needs_due_date()])
+        _reply(reporter, reply_token, [strings.no_ticket_needs_due_date()])
         return
 
     if remind_days_before is not None:
@@ -229,9 +251,7 @@ def _handle_due_date_reply(reporter: str, result: dict, reply_token: str) -> Non
             settings.ohm_line_user_id,
             [strings.due_date_set_notify_hq(ticket["id"], reporter, display_text, due_date, remind_days_before)],
         )
-    reply_message(
-        reply_token, [strings.due_date_set(ticket["id"], display_text, due_date, remind_days_before)]
-    )
+    _reply(reporter, reply_token, [strings.due_date_set(ticket["id"], display_text, due_date, remind_days_before)])
 
 
 def _handle_close_ticket(reporter: str, result: dict, actionable_tickets: list[dict], reply_token: str) -> None:
@@ -245,18 +265,18 @@ def _handle_close_ticket(reporter: str, result: dict, actionable_tickets: list[d
     if ticket_id is not None:
         ticket = tickets.close_ticket_by_id(ticket_id, reporter)
         if ticket is None:
-            reply_message(reply_token, [strings.ticket_not_found_or_closed(ticket_id)])
+            _reply(reporter, reply_token, [strings.ticket_not_found_or_closed(ticket_id)])
             return
         if reporter != "ohm":
             push_message(
                 settings.ohm_line_user_id,
                 [strings.ticket_closed_notify_hq(ticket["id"], reporter, ticket["summary"] or ticket["message"])],
             )
-        reply_message(reply_token, [strings.ticket_closed(ticket["id"], ticket["summary"] or ticket["message"])])
+        _reply(reporter, reply_token, [strings.ticket_closed(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
     if not actionable_tickets:
-        reply_message(reply_token, [strings.no_open_ticket_to_close()])
+        _reply(reporter, reply_token, [strings.no_open_ticket_to_close()])
         return
 
     quick_reply = [
@@ -268,7 +288,7 @@ def _handle_close_ticket(reporter: str, result: dict, actionable_tickets: list[d
     # don't assume that unrelated one is the one they mean. Say so and let
     # them pick if it's actually one of these after all.
     if result.get("close_specific_no_match"):
-        reply_message(reply_token, [strings.close_ticket_no_match_prompt()], quick_reply=quick_reply)
+        _reply(reporter, reply_token, [strings.close_ticket_no_match_prompt()], quick_reply=quick_reply)
         return
 
     if len(actionable_tickets) == 1:
@@ -280,12 +300,12 @@ def _handle_close_ticket(reporter: str, result: dict, actionable_tickets: list[d
                 settings.ohm_line_user_id,
                 [strings.ticket_closed_notify_hq(ticket["id"], reporter, ticket["summary"] or ticket["message"])],
             )
-        reply_message(reply_token, [strings.ticket_closed(ticket["id"], ticket["summary"] or ticket["message"])])
+        _reply(reporter, reply_token, [strings.ticket_closed(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
     # More than one open ticket and nothing to tell them apart by -- ask via
     # tappable buttons instead of guessing which one they meant.
-    reply_message(reply_token, [strings.close_ticket_picker_prompt()], quick_reply=quick_reply)
+    _reply(reporter, reply_token, [strings.close_ticket_picker_prompt()], quick_reply=quick_reply)
 
 
 def _handle_cancel_ticket(
@@ -309,14 +329,14 @@ def _handle_cancel_ticket(
     if ticket_id is not None:
         ticket = tickets.cancel_ticket_by_id(ticket_id, reporter)
         if ticket is None:
-            reply_message(reply_token, [strings.ticket_not_found_or_closed(ticket_id)])
+            _reply(reporter, reply_token, [strings.ticket_not_found_or_closed(ticket_id)])
             return
         if reporter != "ohm":
             push_message(
                 settings.ohm_line_user_id,
                 [strings.ticket_cancelled_notify_hq(ticket["id"], reporter, ticket["summary"] or ticket["message"])],
             )
-        reply_message(reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])])
+        _reply(reporter, reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
     # No explicit number, but this arrived right after the bot asked for a
@@ -331,15 +351,13 @@ def _handle_cancel_ticket(
                     settings.ohm_line_user_id,
                     [strings.ticket_cancelled_notify_hq(ticket["id"], reporter, ticket["summary"] or ticket["message"])],
                 )
-            reply_message(
-                reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])]
-            )
+            _reply(reporter, reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])])
             return
         # Nothing was actually missing a due date after all -- fall through
         # to the generic path below rather than silently doing nothing.
 
     if not actionable_tickets:
-        reply_message(reply_token, [strings.no_open_ticket_to_cancel()])
+        _reply(reporter, reply_token, [strings.no_open_ticket_to_cancel()])
         return
 
     if len(actionable_tickets) == 1:
@@ -351,7 +369,7 @@ def _handle_cancel_ticket(
                 settings.ohm_line_user_id,
                 [strings.ticket_cancelled_notify_hq(ticket["id"], reporter, ticket["summary"] or ticket["message"])],
             )
-        reply_message(reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])])
+        _reply(reporter, reply_token, [strings.ticket_cancelled(ticket["id"], ticket["summary"] or ticket["message"])])
         return
 
     # More than one open ticket and nothing to tell them apart by -- ask via
@@ -360,7 +378,7 @@ def _handle_cancel_ticket(
     quick_reply = [
         QuickReplyOption(label=_ticket_picker_label(t), text=f"ยกเลิก #{t['id']}") for t in actionable_tickets
     ]
-    reply_message(reply_token, [strings.cancel_ticket_picker_prompt()], quick_reply=quick_reply)
+    _reply(reporter, reply_token, [strings.cancel_ticket_picker_prompt()], quick_reply=quick_reply)
 
 
 def _handle_photo_message(reporter: str, message: dict, is_group: bool, reply_token: str) -> None:

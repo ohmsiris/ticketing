@@ -38,6 +38,18 @@ You are a message classifier for a small internal ticket system used by two \
 people. Messages will primarily be in Thai, sometimes mixed with English \
 technical terms -- classify accordingly.
 
+You may be given the recent conversation between this person and the bot \
+(their messages and the bot's replies, oldest first), followed by their \
+newest message to classify now. Use that history the way a person would: \
+if the bot's last message asked a question (e.g. "when's this due?"), a \
+short or terse-looking reply -- even a bare number, a date with no spaces, \
+or just "ไม่มี"/"ไม่แน่ใจ" -- is almost certainly answering THAT, not \
+describing something new. If they're correcting, clarifying, or backing \
+out of something from a moment ago ("ไม่ใช่", "ยกเลิก", "เอาใหม่"), read it \
+against what was actually just said, not in isolation. If there's no \
+history, or the newest message clearly stands on its own, just read it \
+normally -- don't force a connection that isn't there.
+
 Read the user's latest message and decide what they mean. Respond with ONLY \
 a single JSON object, no markdown fences, no explanation, matching exactly \
 this shape:
@@ -174,27 +186,6 @@ just repeat the message as-is.
 Today's date is {today} ({tz}). Use it to resolve any relative dates.
 """
 
-# Appended to the system prompt only when the sender has an open ticket
-# that's still missing a due date -- i.e. the bot's last message to them was
-# almost certainly "when's this due?". Without this, short replies like
-# "อีก2วัน" get read cold, with no idea a due-date question was just asked,
-# and can get misread as a new ticket instead of an answer.
-CONTEXT_AWAITING_DUE_DATE = """
-
-Context: this person has an open ticket that's still missing a due date, \
-and the bot's last message to them was asking for one. If this message \
-could plausibly be answering that -- a timeframe, a date, "ไม่มี", \
-"ไม่แน่ใจ", even a bare number -- classify it as "due_date_reply" rather \
-than "new_ticket", even if the phrasing is terse or has no spaces (e.g. \
-"อีก2วัน" means "อีก 2 วัน"). If instead they're backing out of the \
-ticket itself rather than answering about a date -- "ยกเลิก", "ไม่เอาแล้ว", \
-"ไม่ใช่", "พิมพ์ผิด" and similar, with nothing that reads as a date -- \
-classify it as "cancel_ticket" with cancel_ticket_id left null; the app \
-already knows which ticket that means in this situation. Only treat it as \
-a new_ticket if it clearly describes a distinct new problem instead.
-"""
-
-
 def _open_tickets_context(open_tickets: Optional[list]) -> str:
     """
     Builds the context block listing tickets this sender can act on, so
@@ -272,6 +263,7 @@ def classify(
     message: str,
     awaiting_due_date: bool = False,
     open_tickets: Optional[list] = None,
+    conversation_history: Optional[list] = None,
 ) -> Classification:
     """
     Classifies a single incoming text message. Never raises -- on any error,
@@ -282,19 +274,30 @@ def classify(
     "when's this due?" asks them to repeat it rather than fabricating a
     phantom ticket out of what was never a candidate to be a fresh report.
 
-    awaiting_due_date: pass True when the sender has an open ticket still
-    missing a due date, so the classifier knows a short reply is more likely
-    answering that than describing something new (see webhook_handler.py).
+    awaiting_due_date: still used ONLY for that fallback default above (a
+    cheap, deterministic DB check -- see get_open_tickets_for_reporter in
+    tickets.py) -- it no longer shapes the prompt itself. That job now
+    belongs to conversation_history below, which the model reads directly
+    instead of us hand-summarizing "the bot just asked about a due date"
+    into prose every time a new scenario like that comes up.
 
     open_tickets: this sender's currently open tickets (list of dicts with
     at least id/message/summary), so a close_ticket message can be matched
     to one by content instead of requiring an exact ticket number.
+
+    conversation_history: recent turns for this sender (list of
+    {"role": "user"|"assistant", "text": ...}, oldest first, NOT including
+    `message` itself) -- see app/conversation.py. Passed to Claude as real
+    prior turns, not summarized into the system prompt, so it can use
+    context the way it naturally would in any other conversation instead of
+    relying on us to have anticipated and hand-flagged the scenario.
     """
     today = datetime.now(ZoneInfo(TIMEZONE)).date().isoformat()
     system = SYSTEM_PROMPT.format(today=today, tz=TIMEZONE)
-    if awaiting_due_date:
-        system += CONTEXT_AWAITING_DUE_DATE
     system += _open_tickets_context(open_tickets)
+
+    messages = [{"role": turn["role"], "content": turn["text"]} for turn in (conversation_history or [])]
+    messages.append({"role": "user", "content": message})
 
     result = _default_classification(awaiting_due_date)
     raw_text = None
@@ -303,7 +306,7 @@ def classify(
             model=MODEL,
             max_tokens=300,
             system=system,
-            messages=[{"role": "user", "content": message}],
+            messages=messages,
         )
         # claude-sonnet-5 can return a leading "thinking" content block
         # before the actual answer, so find the text block by type rather
@@ -380,6 +383,7 @@ def classify(
                 "raw_message": message,
                 "awaiting_due_date": awaiting_due_date,
                 "open_ticket_ids": [t["id"] for t in (open_tickets or [])],
+                "history_turns": len(conversation_history or []),
                 "model_output": raw_text,
                 "classification": routed,
             },
