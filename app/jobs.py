@@ -2,7 +2,10 @@
 The scheduled jobs. All pushed to Ohm only, except #4:
 
 1. open_tickets_reminder -- every 4 hours during 08:00-20:00 Asia/Bangkok,
-   digest of open tickets older than 2 hours.
+   digest of open tickets older than 2 hours that are actually stale (no
+   due date, or due date today/passed) -- a ticket with a future due date
+   is "on track" and is covered by due_soon_digest/due_today_digest
+   instead, not renagged about here too (see get_stale_open_tickets).
 2. due_today_digest -- once a day at 08:00 Asia/Bangkok, digest of tickets
    due today.
 3. due_soon_digest -- once a day at 08:00 Asia/Bangkok, heads-up digest of
@@ -38,7 +41,7 @@ OPEN_TICKET_MIN_AGE_HOURS = 2
 
 
 def open_tickets_reminder() -> None:
-    open_tickets = tickets.get_open_tickets(min_age_hours=OPEN_TICKET_MIN_AGE_HOURS)
+    open_tickets = tickets.get_stale_open_tickets(min_age_hours=OPEN_TICKET_MIN_AGE_HOURS)
     if not open_tickets:
         return  # nothing stale enough to nag about
     push_message(settings.ohm_line_user_id, [strings.open_tickets_digest(open_tickets)])

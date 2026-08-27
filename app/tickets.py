@@ -356,6 +356,24 @@ def get_open_tickets(min_age_hours: float = 0) -> list[dict]:
     return out
 
 
+def get_stale_open_tickets(min_age_hours: float = 0) -> list[dict]:
+    """
+    Like get_open_tickets, but excludes tickets that already have a FUTURE
+    due date -- those are "on track" and already covered by due_soon_digest
+    / due_today_digest, so renagging about them here on top is redundant.
+    Only tickets with no due date at all, or a due date that's today or
+    already passed, count as "stale" for this job. Fixes a real report: a
+    ticket due two weeks out was getting nagged about every 4 hours in the
+    meantime, indistinguishable from a ticket with no plan at all. Used
+    only by jobs.open_tickets_reminder -- the on-demand "open tickets"
+    command intentionally still shows everything via get_open_tickets
+    itself, since that's an explicit "show me the full status", not an
+    automatic nag.
+    """
+    today = today_bangkok_str()
+    return [t for t in get_open_tickets(min_age_hours=min_age_hours) if t["due_date"] is None or t["due_date"] <= today]
+
+
 def mark_reminded(ticket_ids: list[int]) -> None:
     if not ticket_ids:
         return
