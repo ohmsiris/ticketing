@@ -131,20 +131,28 @@ per step 2 above, and you're running.
 
 ## Project layout
 
+Core ticketing files only -- bill/slip tracking and the vehicle roster
+sync have their own files (`bills.py`, `slips.py`, `bill_extraction.py`,
+`slip_extraction.py`, `roster_sync.py`, `bills_routes.py`,
+`slips_routes.py`, `image_classifier.py`) covered by their own sections
+above, not repeated here.
+
 ```
 app/
   main.py             FastAPI app: /webhook, /health, /tickets(.csv), startup wiring
   config.py            env var loading
   db.py                 SQLite schema + connection helper
   tickets.py             all ticket / user_state queries
-  classifier.py            the Claude call that classifies each message
-  line_client.py            LINE reply/push + webhook signature check + quick reply
-  webhook_handler.py         routes a classified message to an action
-  jobs.py                     the two scheduled digest jobs
-  strings.py                   every Thai string the bot sends
-  dashboard.py                  renders /tickets (HTML) and /tickets.csv
+  maintenance.py           the recurring-maintenance catalog + completion/reminder queries
+  conversation.py            per-reporter recent-message memory fed to the classifier
+  classifier.py                the Claude call that classifies each message
+  line_client.py                LINE reply/push + webhook signature check + quick reply
+  webhook_handler.py             routes a classified message to an action
+  jobs.py                         the scheduled digest jobs
+  strings.py                       every Thai string the bot sends
+  dashboard.py                      renders /tickets (HTML) and /tickets.csv
 data/
-  tickets.db                    created automatically on first run
+  tickets.db                        created automatically on first run
 ```
 
 ## Viewing all tickets
@@ -252,6 +260,39 @@ Setup, in addition to everything bill tracking already needs:
 vehicle roster, there's no auto-refresh-from-a-Sheet job for it yet) --
 update it by hand if an account is added, closed, or reassigned to a
 different branch.
+
+## Preventive maintenance tracking
+
+Separate from `tickets` -- a catalog of recurring equipment tasks (tube
+cleaning, oil changes, chlorine checks, etc.), each with its own cadence,
+seeded from the company's real paper maintenance sheets. Currently **Ohm
+only** (not Mom, not other staff yet -- see `app/maintenance.py`'s module
+docstring for why, and how that's meant to widen later).
+
+**Report a task done** -- just say what you did, no special trigger word:
+
+```
+เพิ่งล้างฟรีซหลอดใหญ่ 50 ตัน เครื่อง 2 เสร็จ
+```
+
+Claude matches it against the task catalog by meaning. If it doesn't match
+anything confidently, it's treated as a normal new ticket instead (never
+silently marks the wrong task done).
+
+**Reminders**: once a day at 08:00 Asia/Bangkok, a digest of everything due
+or overdue (last completion + its interval), grouped by category. Keeps
+re-listing anything still outstanding every day until it's reported done --
+same philosophy as the ticket system's stale-open-ticket nag. Some tasks
+(e.g. vacuum-freeze cleaning) aren't on a fixed schedule at all -- they're
+triggered by an observed condition instead, stored as `interval_days = 0`,
+and never appear in this digest no matter how long ago they were last done.
+
+**Editing the catalog**: the full task list is `DEFAULT_TASKS` in
+`app/maintenance.py` -- plain Python, one entry per task (name, category,
+interval in days, optional notes). Edit it directly and redeploy;
+`seed_default_tasks()` runs on every startup and syncs the database to
+match exactly (updates existing tasks by name, adds new ones, retires
+anything removed -- never duplicates, never loses completion history).
 
 ## Notes / known limits (v0, by design)
 
