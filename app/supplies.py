@@ -136,6 +136,27 @@ def get_known_canonical_parts() -> list[str]:
     return sorted(combined[:MAX_KNOWN_PARTS_IN_PROMPT])
 
 
+def _effective_continues_next_page(extracted: dict) -> bool:
+    """
+    The model's own continues_next_page flag, OR'd with "no total was
+    found on this page" (has_total_this_page is False). These two
+    signals should never disagree -- a bill can't be genuinely finished
+    without ever showing a total -- but they sometimes do: a real
+    incident had the model independently report "no total here" AND
+    "this looks complete" on the very same page. Trusting
+    continues_next_page alone in that contradictory case silently ended
+    the chain, fragmenting the rest of a real multi-page bill into
+    several separate, bogus บาท0 purchases instead of one.
+
+    Safe to be sticky/conservative about staying "open" on any ambiguity
+    now: see FINALIZE_CHAIN_COMMAND_PREFIX in app/webhook_handler.py --
+    a chain that stays open one page too long is a one-tap "ไม่มีหน้าต่อ
+    แล้ว" fix with full visibility; a chain that closes one page too
+    early used to silently fragment the bill with no visibility at all.
+    """
+    return bool(extracted.get("continues_next_page")) or not bool(extracted.get("has_total_this_page"))
+
+
 def find_open_chain(reporter: str) -> Optional[dict]:
     """Most recent still-open (awaiting next page) purchase for this
     reporter, if one exists and isn't too stale to plausibly be
@@ -173,7 +194,7 @@ def create_purchase(reporter: str, extracted: dict, source_photo_id: str) -> str
                 purchase_id, reporter,
                 extracted.get("supplier_name", ""), extracted.get("date", ""), extracted.get("branch", ""),
                 extracted.get("total_cost", ""), source_photo_id,
-                1 if extracted.get("continues_next_page") else 0,
+                1 if _effective_continues_next_page(extracted) else 0,
                 _utc_now_iso(),
             ),
         )
@@ -209,7 +230,7 @@ def append_page_to_chain(purchase_id: str, extracted: dict, source_photo_id: str
             totals_reconciled = totals_are_close_enough(combined_sum, final_total)
             updates["total_cost"] = final_total
 
-        updates["continues_next_page"] = 1 if extracted.get("continues_next_page") else 0
+        updates["continues_next_page"] = 1 if _effective_continues_next_page(extracted) else 0
         updates["source_photos"] = f"{purchase.get('source_photos') or ''},{source_photo_id}".lstrip(",")
 
         set_clause = ", ".join(f"{k} = ?" for k in updates)
@@ -277,6 +298,22 @@ def get_all_purchases() -> list[dict]:
     try:
         rows = conn.execute("SELECT * FROM supply_purchases ORDER BY created_at DESC").fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def cancel_purchase(purchase_id: str) -> bool:
+    """Permanently deletes a supply purchase and its line items -- same
+    reasoning and same pending_review-only restriction as
+    bills.cancel_bill. supply_purchase_items cascades via its own
+    ON DELETE CASCADE foreign key."""
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "DELETE FROM supply_purchases WHERE purchase_id = ? AND status = 'pending_review'", (purchase_id,)
+        )
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         conn.close()
 

@@ -88,6 +88,13 @@
 
         {% if purchase.status == "verified" %}
         <p class="verified-note">ยืนยันเมื่อ {{ purchase.verified_at }} โดย {{ purchase.verified_by }}</p>
+        {% else %}
+        <div class="cancel-row">
+            <form method="POST" action="/supplies/{{ purchase.purchase_id }}/cancel?token={{ token }}"
+                  onsubmit="return confirm('ยกเลิกบิลซื้ออะไหล่นี้เลยไหม? ข้อมูลจะถูกลบถาวร กู้คืนไม่ได้');">
+                <button type="submit" class="danger-button">ยกเลิกบิลนี้ (ลบถาวร)</button>
+            </form>
+        </div>
         {% endif %}
     </div>
 

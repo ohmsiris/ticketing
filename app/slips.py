@@ -89,6 +89,20 @@ def get_all_slips() -> list[dict]:
         conn.close()
 
 
+def cancel_slip(slip_id: str) -> bool:
+    """Permanently deletes a slip -- same reasoning and same
+    pending_review-only restriction as bills.cancel_bill (no line items
+    table for slips -- always a single transaction, so nothing else to
+    cascade)."""
+    conn = get_conn()
+    try:
+        cur = conn.execute("DELETE FROM slips WHERE slip_id = ? AND status = 'pending_review'", (slip_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 def save_reviewed_slip(slip_id: str, fields: dict, verified_by: str) -> None:
     """Applies a manager's edits from the review webpage and marks the
     slip verified. Writing the confirmed version to the real Transaction

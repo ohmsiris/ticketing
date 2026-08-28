@@ -91,3 +91,15 @@ async def supply_purchase_review_submit(request: Request, purchase_id: str, toke
         logger.error("supply purchase %s saved locally but Google Sheets sync failed -- needs manual attention", purchase_id)
 
     return RedirectResponse(url=f"/supplies?token={token}", status_code=303)
+
+
+@router.post("/supplies/{purchase_id}/cancel")
+def supply_purchase_cancel(purchase_id: str, token: str = ""):
+    """Permanently deletes a mistaken/duplicate pending purchase -- see
+    supplies.cancel_purchase. Same reasoning as bills_routes.bill_cancel:
+    the review page's own confirm() dialog is the only guard, this route
+    doesn't ask twice, and it's a no-op if already verified or missing."""
+    if not _token_ok(token):
+        return _forbidden()
+    supplies.cancel_purchase(purchase_id)
+    return RedirectResponse(url=f"/supplies?token={token}", status_code=303)

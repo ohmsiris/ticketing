@@ -88,3 +88,15 @@ async def slip_review_submit(request: Request, slip_id: str, token: str = ""):
         logger.error("slip %s saved locally but Transaction Log sync failed -- needs manual attention", slip_id)
 
     return RedirectResponse(url=f"/slips?token={token}", status_code=303)
+
+
+@router.post("/slips/{slip_id}/cancel")
+def slip_cancel(slip_id: str, token: str = ""):
+    """Permanently deletes a mistaken/duplicate pending slip -- see
+    slips.cancel_slip. Same reasoning as bills_routes.bill_cancel: the
+    review page's own confirm() dialog is the only guard, this route
+    doesn't ask twice, and it's a no-op if already verified or missing."""
+    if not _token_ok(token):
+        return _forbidden()
+    slips.cancel_slip(slip_id)
+    return RedirectResponse(url=f"/slips?token={token}", status_code=303)

@@ -73,6 +73,23 @@ def _insert_line_items(conn, bill_id: str, items: list[dict], start: int = 1) ->
         )
 
 
+def _effective_continues_next_page(extracted: dict) -> bool:
+    """
+    The model's own continues_next_page flag, OR'd with "no total was
+    found on this page" (has_total_this_page is False). See
+    app/supplies.py's identical helper for the full reasoning -- a real
+    incident there had the model independently report "no total here"
+    AND "this looks complete" on the same page, which prematurely closed
+    a chain and fragmented the rest of a multi-page bill into several
+    separate, bogus บาท0 records. Safe to be sticky about staying "open"
+    on any ambiguity now that there's a visible notification + one-tap
+    "no more pages" override (see FINALIZE_CHAIN_COMMAND_PREFIX in
+    app/webhook_handler.py) for the case where this errs too far the
+    other way.
+    """
+    return bool(extracted.get("continues_next_page")) or not bool(extracted.get("has_total_this_page"))
+
+
 def find_open_chain(reporter: str) -> Optional[dict]:
     """Most recent still-open (awaiting next page) bill for this
     reporter, if one exists and isn't too stale to plausibly be
@@ -115,7 +132,7 @@ def create_bill(reporter: str, source_type: str, extracted: dict, source_photo_i
                 extracted.get("vehicle_number", ""), extracted.get("vehicle_match_warning", ""),
                 extracted.get("mileage", ""), extracted.get("next_service_mileage", ""),
                 extracted.get("total_cost", ""), source_photo_id,
-                1 if extracted.get("continues_next_page") else 0,
+                1 if _effective_continues_next_page(extracted) else 0,
                 _utc_now_iso(),
             ),
         )
@@ -158,7 +175,7 @@ def append_page_to_chain(bill_id: str, extracted: dict, source_photo_id: str) ->
             totals_reconciled = totals_are_close_enough(combined_sum, final_total)
             updates["total_cost"] = final_total
 
-        updates["continues_next_page"] = 1 if extracted.get("continues_next_page") else 0
+        updates["continues_next_page"] = 1 if _effective_continues_next_page(extracted) else 0
         updates["source_photos"] = f"{bill.get('source_photos') or ''},{source_photo_id}".lstrip(",")
 
         set_clause = ", ".join(f"{k} = ?" for k in updates)
@@ -225,6 +242,27 @@ def get_all_bills() -> list[dict]:
     try:
         rows = conn.execute("SELECT * FROM bills ORDER BY created_at DESC").fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def cancel_bill(bill_id: str) -> bool:
+    """
+    Permanently deletes a bill and its line items -- for a mistaken/
+    duplicate entry on the review page (see app/bills_routes.py's cancel
+    route), NOT for anything already verified: a verified bill has
+    already synced to the real Google Sheet, and deleting it here
+    wouldn't touch that row, leaving the two silently out of sync. Only
+    ever deletes a still-pending_review bill; returns False (no-op,
+    nothing deleted) if it's already verified or doesn't exist, so the
+    caller can tell the difference from "actually cancelled" and say so.
+    bill_line_items cascades via its own ON DELETE CASCADE foreign key.
+    """
+    conn = get_conn()
+    try:
+        cur = conn.execute("DELETE FROM bills WHERE bill_id = ? AND status = 'pending_review'", (bill_id,))
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         conn.close()
 

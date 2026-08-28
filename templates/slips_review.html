@@ -90,6 +90,13 @@
         {% if slip.status == "verified" %}
         <p class="verified-note">ยืนยันเมื่อ {{ slip.verified_at }} โดย {{ slip.verified_by }}
             {% if slip.sheet_row %}(แถวที่ {{ slip.sheet_row }} ใน Transaction Log){% endif %}</p>
+        {% else %}
+        <div class="cancel-row">
+            <form method="POST" action="/slips/{{ slip.slip_id }}/cancel?token={{ token }}"
+                  onsubmit="return confirm('ยกเลิกสลิปนี้เลยไหม? ข้อมูลจะถูกลบถาวร กู้คืนไม่ได้');">
+                <button type="submit" class="danger-button">ยกเลิกสลิปนี้ (ลบถาวร)</button>
+            </form>
+        </div>
         {% endif %}
     </div>
 </body>

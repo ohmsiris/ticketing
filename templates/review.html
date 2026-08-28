@@ -105,6 +105,13 @@
 
         {% if bill.status == "verified" %}
         <p class="verified-note">ยืนยันเมื่อ {{ bill.verified_at }} โดย {{ bill.verified_by }}</p>
+        {% else %}
+        <div class="cancel-row">
+            <form method="POST" action="/bills/{{ bill.bill_id }}/cancel?token={{ token }}"
+                  onsubmit="return confirm('ยกเลิกบิลนี้เลยไหม? ข้อมูลจะถูกลบถาวร กู้คืนไม่ได้');">
+                <button type="submit" class="danger-button">ยกเลิกบิลนี้ (ลบถาวร)</button>
+            </form>
+        </div>
         {% endif %}
     </div>
 

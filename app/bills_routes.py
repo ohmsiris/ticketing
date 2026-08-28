@@ -103,6 +103,19 @@ async def bill_review_submit(request: Request, bill_id: str, token: str = ""):
     return RedirectResponse(url=f"/bills?token={token}", status_code=303)
 
 
+@router.post("/bills/{bill_id}/cancel")
+def bill_cancel(bill_id: str, token: str = ""):
+    """Permanently deletes a mistaken/duplicate pending bill -- see
+    bills.cancel_bill. The review page's own confirm() dialog is the
+    only guard against a misclick; this route itself doesn't ask twice.
+    A no-op (redirects the same either way) if the bill is already
+    verified or doesn't exist."""
+    if not _token_ok(token):
+        return _forbidden()
+    bills.cancel_bill(bill_id)
+    return RedirectResponse(url=f"/bills?token={token}", status_code=303)
+
+
 @router.get("/admin/roster-refresh", response_class=HTMLResponse)
 def roster_refresh_now(token: str = ""):
     """Manually triggers the same roster pull the 03:00 scheduled job runs
