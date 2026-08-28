@@ -44,6 +44,9 @@ class Settings:
     # -- payment-slip tracking (see app/slip_extraction.py, app/slips_routes.py) --
     accounting_sheet_id: str  # the "Accounting" Google Sheet's id -- verified slips sync to its Transaction Log tab
     transaction_log_worksheet: str  # tab name; defaults to "Transaction Log"
+    # -- preventive-maintenance completion log (see app/maintenance.py, app/sheets_client.py) --
+    maintenance_sheet_id: str  # a separate Google Sheet's id -- every completion appends a row, no review step needed
+    maintenance_sheet_worksheet: str  # tab name; blank = first tab
 
 
 def _env(key: str, default: str = "") -> str:
@@ -81,6 +84,8 @@ def _load() -> Settings:
         drivers_roster_worksheet=_env("DRIVERS_ROSTER_WORKSHEET"),
         accounting_sheet_id=_env("ACCOUNTING_SHEET_ID", "1ygXYrtNzLAZ4eUVzD7ydlsACCH0QKHXdmf5LncX6ANM"),
         transaction_log_worksheet=_env("TRANSACTION_LOG_WORKSHEET", "Transaction Log"),
+        maintenance_sheet_id=_env("MAINTENANCE_SHEET_ID"),
+        maintenance_sheet_worksheet=_env("MAINTENANCE_SHEET_WORKSHEET"),
     )
 
 

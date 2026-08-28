@@ -294,6 +294,37 @@ interval in days, optional notes). Edit it directly and redeploy;
 match exactly (updates existing tasks by name, adds new ones, retires
 anything removed -- never duplicates, never loses completion history).
 
+**Backdating a completion**: forgot to report something at the time?
+Just say when you actually did it -- "เมื่อวานล้างฟรีซหลอด 2 เสร็จ"
+(yesterday), "2 เดือนที่แล้ว" (about 2 months ago), or an explicit date
+("...ตั้งแต่วันที่ 15 มิถุนายน"). This shifts the reminder math correctly
+(a backdated report can make a task immediately due again, rather than
+the app thinking the cadence just restarted from today) -- but isn't
+100% reliable in one shot for harder phrasing (an explicit date is more
+reliable than a vague "months ago" estimate). The resolved date always
+shows in the confirmation reply, so a wrong read is visible immediately
+and correctable with a follow-up message like "ไม่ใช่ 2 เดือนก่อน".
+
+### Syncing completions to a Google Sheet
+
+Every completion reported via LINE can also append a row to a separate
+Google Sheet -- no review/confirm step, unlike bills/slips below, since
+this is lower-stakes than financial data. Uses the same service account
+as bill/slip tracking (`GOOGLE_SERVICE_ACCOUNT_JSON`).
+
+1. Create a new Google Sheet (any name).
+2. Share it as **Editor** with the service account's email (the
+   `client_email` field inside `GOOGLE_SERVICE_ACCOUNT_JSON`).
+3. Set `MAINTENANCE_SHEET_ID` (from its URL) in your env vars.
+4. Optional: `MAINTENANCE_SHEET_WORKSHEET` if you want it on a tab other
+   than the first one.
+
+Leave `MAINTENANCE_SHEET_ID` blank to disable this entirely -- completions
+still work and log to the database either way (that's always the real
+source of truth), they just won't also mirror to a Sheet. A sync failure
+(bad sheet id, revoked sharing, etc.) is logged loudly but never blocks
+the LINE reply.
+
 ## Notes / known limits (v0, by design)
 
 - Text only. Voice notes get a polite "not supported yet, please type it"

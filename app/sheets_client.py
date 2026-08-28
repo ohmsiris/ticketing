@@ -15,14 +15,18 @@ duplicate. bill_id is unique per bill, so it's the natural lookup key.
 """
 import json
 import logging
+from datetime import datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import gspread
 from google.oauth2.service_account import Credentials
 
-from app.config import settings
+from app.config import TIMEZONE, settings
 
 logger = logging.getLogger("ticketing.sheets")
+
+BANGKOK = ZoneInfo(TIMEZONE)
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -200,4 +204,47 @@ def sync_verified_bill(bill: dict) -> bool:
         return True
     except Exception:
         logger.exception("failed to sync bill %s to Google Sheets", bill.get("bill_id"))
+        return False
+
+
+# --- Preventive maintenance -- a separate Sheet, one row per completion ---
+#
+# Unlike bills/slips there's no manager review step here: a completion
+# report goes straight from LINE -> classify() -> maintenance_log -> this
+# Sheet. Append-only by design (no upsert-by-key) -- SQLite's
+# maintenance_log is already an immutable event log, and this just
+# mirrors it, so there's no "existing row to find and update" concept the
+# way a re-confirmed bill has.
+MAINTENANCE_HEADER = ["completed_date", "category", "task", "reporter", "note", "logged_at"]
+
+
+def _maintenance_sheet():
+    book = _client_lazy().open_by_key(settings.maintenance_sheet_id)
+    sheet = book.worksheet(settings.maintenance_sheet_worksheet) if settings.maintenance_sheet_worksheet else book.sheet1
+    _ensure_header(sheet, MAINTENANCE_HEADER)
+    return sheet
+
+
+def log_maintenance_completion(completed_date: str, category: str, task_name: str, reporter: str, note: str) -> bool:
+    """
+    Appends one row for a completion just logged via LINE (see
+    app.maintenance.log_completion, called right before this in
+    app/webhook_handler.py). No-ops (returns False, logged) if
+    MAINTENANCE_SHEET_ID isn't configured -- same "feature is just off"
+    convention as app/roster_sync.py's DRIVERS_SHEET_ID check, so this
+    isn't required for the rest of the app to work. Deliberately doesn't
+    raise on failure, same reasoning as sync_verified_bill/slip: the
+    SQLite row already has the real data either way.
+    """
+    if not settings.maintenance_sheet_id:
+        logger.info("MAINTENANCE_SHEET_ID not set -- skipping Sheets sync for this completion")
+        return False
+    try:
+        sheet = _maintenance_sheet()
+        logged_at = datetime.now(BANGKOK).strftime("%Y-%m-%d %H:%M")
+        sheet.append_row([completed_date, category, task_name, reporter, note, logged_at], value_input_option="USER_ENTERED")
+        logger.info("synced maintenance completion (%s) to Google Sheets OK", task_name)
+        return True
+    except Exception:
+        logger.exception("failed to sync maintenance completion (%s) to Google Sheets", task_name)
         return False

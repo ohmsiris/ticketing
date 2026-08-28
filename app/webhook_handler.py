@@ -5,11 +5,13 @@ together; kept separate from main.py so the routing logic is easy to read
 on its own.
 """
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-from app import bills, conversation, maintenance, slips, strings, tickets
+from app import bills, conversation, maintenance, sheets_client, slips, strings, tickets
 from app.bill_extraction import extract_bill
 from app.classifier import classify
-from app.config import settings
+from app.config import TIMEZONE, settings
 from app.image_classifier import classify_image
 from app.line_client import QuickReplyOption, download_message_content, push_message, reply_message
 from app.slip_extraction import extract_slip
@@ -17,6 +19,11 @@ from app.slip_extraction import extract_slip
 logger = logging.getLogger("ticketing.webhook")
 
 ONBOARDING_TICKET_THRESHOLD = 3  # mom gets onboarding copy for tickets 1-3
+BANGKOK = ZoneInfo(TIMEZONE)
+
+
+def _bangkok_date_str(iso_utc: str) -> str:
+    return datetime.fromisoformat(iso_utc).astimezone(BANGKOK).date().isoformat()
 
 
 def resolve_reporter(line_user_id: str) -> str | None:
@@ -421,6 +428,13 @@ def _handle_maintenance_done(reporter: str, text: str, result: dict, reply_token
     calendar_date = result.get("maintenance_completed_calendar")
     completed_at = maintenance.resolve_completed_at(days_ago, calendar_date)
     maintenance.log_completion(task_id, reporter, text, completed_at=completed_at)
+
+    # Best-effort mirror to a separate Google Sheet -- a no-op (logged, not
+    # raised) if MAINTENANCE_SHEET_ID isn't configured, so this never blocks
+    # the reply. SQLite is already the real source of truth either way.
+    completed_date = tickets.today_bangkok_str() if completed_at is None else _bangkok_date_str(completed_at)
+    sheets_client.log_maintenance_completion(completed_date, task["category"], task["name"], reporter, text)
+
     _reply(reporter, reply_token, [strings.maintenance_done_confirmation(task["name"], days_ago, calendar_date)])
 
 
