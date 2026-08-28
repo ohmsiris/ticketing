@@ -163,6 +163,42 @@ CREATE TABLE IF NOT EXISTS maintenance_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_maintenance_log_task_completed ON maintenance_log (task_id, completed_at);
+
+-- Supply/parts purchase tracking (belts, bearings, chains, breakers,
+-- relays, etc.) -- separate from vehicle repair bills, same shape (a
+-- header + line items, same review-before-Sheets-sync flow) but no
+-- vehicle-specific fields (plate, mileage, roster matching). See
+-- app/supplies.py, app/supply_extraction.py, app/supplies_routes.py.
+CREATE TABLE IF NOT EXISTS supply_purchases (
+    purchase_id          TEXT PRIMARY KEY,       -- e.g. 'P-20260828-7K3M'
+    status                TEXT NOT NULL DEFAULT 'pending_review'
+                              CHECK (status IN ('pending_review', 'verified')),
+    reporter              TEXT NOT NULL CHECK (reporter IN ('ohm', 'mom')),  -- who sent it in, not necessarily who verifies it
+    supplier_name         TEXT,
+    date                  TEXT,
+    branch                TEXT,
+    total_cost            TEXT,
+    source_photos         TEXT,        -- comma-separated LINE message ids, for traceability
+    continues_next_page   INTEGER NOT NULL DEFAULT 0,  -- 1 = still an open chain awaiting its next page
+    created_at            TEXT NOT NULL,
+    verified_at           TEXT,
+    verified_by           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS supply_purchase_items (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id        TEXT NOT NULL REFERENCES supply_purchases(purchase_id) ON DELETE CASCADE,
+    line_item_number   INTEGER NOT NULL,
+    description        TEXT,
+    category           TEXT,
+    quantity           TEXT,
+    unit               TEXT,
+    unit_price         TEXT,
+    cost               TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_supply_purchases_reporter_status ON supply_purchases (reporter, status);
+CREATE INDEX IF NOT EXISTS idx_supply_purchase_items_purchase_id ON supply_purchase_items (purchase_id);
 """
 
 

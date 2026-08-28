@@ -47,6 +47,9 @@ class Settings:
     # -- preventive-maintenance completion log (see app/maintenance.py, app/sheets_client.py) --
     maintenance_sheet_id: str  # a separate Google Sheet's id -- every completion appends a row, no review step needed
     maintenance_sheet_worksheet: str  # tab name; blank = first tab
+    # -- supply/parts purchase tracking (see app/supplies.py, app/supplies_routes.py) --
+    supplies_sheet_id: str
+    supply_line_items_sheet_id: str
 
 
 def _env(key: str, default: str = "") -> str:
@@ -86,6 +89,8 @@ def _load() -> Settings:
         transaction_log_worksheet=_env("TRANSACTION_LOG_WORKSHEET", "Transaction Log"),
         maintenance_sheet_id=_env("MAINTENANCE_SHEET_ID"),
         maintenance_sheet_worksheet=_env("MAINTENANCE_SHEET_WORKSHEET"),
+        supplies_sheet_id=_env("SUPPLIES_SHEET_ID"),
+        supply_line_items_sheet_id=_env("SUPPLY_LINE_ITEMS_SHEET_ID"),
     )
 
 

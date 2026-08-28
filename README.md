@@ -325,6 +325,44 @@ source of truth), they just won't also mirror to a Sheet. A sync failure
 (bad sheet id, revoked sharing, etc.) is logged loudly but never blocks
 the LINE reply.
 
+## Supply/parts purchase tracking (belts, bearings, chains, breakers, relays, etc.)
+
+Same shape as bill tracking, for a third document type: a photographed
+purchase bill for spare parts/consumables -- not tied to any one vehicle.
+Claude reads it (`app/supply_extraction.py`), a manager confirms it at
+`/supplies?token=...`, and the confirmed purchase (plus its line items)
+syncs to two dedicated Google Sheets, same pattern as Bills/LineItems.
+
+Every incoming photo/PDF is now classified as one of **four** things
+(`app/image_classifier.py`): a repair bill, a payment slip, a supply
+purchase, or unclear (unclear still falls back to the bill flow, same as
+before). Alongside the type, the classifier also rates its own
+**confidence**. When it's confident, the photo is routed straight through
+with no extra back-and-forth, same as before this feature existed. When
+it genuinely can't tell which of the three document types it's looking at
+(e.g. a compressor-bearing purchase could plausibly be misread as a repair
+bill), it asks instead of guessing -- pushing a tap-to-choose menu (only
+in Ohm's/Mom's own 1:1 chat, never in a group) and re-reading the same
+photo once you tap the right one.
+
+Setup, in addition to everything bill tracking already needs:
+1. Create two new Google Sheets (Supplies, SupplyLineItems), same idea as
+   Bills/LineItems.
+2. Share both as **Editor** with the same service account.
+3. Set `SUPPLIES_SHEET_ID` and `SUPPLY_LINE_ITEMS_SHEET_ID` in your env
+   vars. Reuses `REVIEW_TOKEN` to gate `/supplies?token=...` -- no new
+   token needed.
+
+**Categories are a first draft.** `CATEGORIES` in `app/supply_extraction.py`
+(belts & chains, bearings & bushings, electrical, motors & pumps, seals &
+gaskets, piping, oils/lubricants, refrigerant, filters, fasteners, tools,
+labor/service, other) was written without real sample bills to check it
+against -- expect it to need a correction round once real purchases start
+coming in, the same way `DEFAULT_TASKS` in `app/maintenance.py` did after
+its first real-world review. Editing it is the same drill: change the
+list, redeploy; existing rows keep whatever category they were saved
+with, only new extractions use the updated list.
+
 ## Notes / known limits (v0, by design)
 
 - Text only. Voice notes get a polite "not supported yet, please type it"

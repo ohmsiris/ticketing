@@ -248,3 +248,61 @@ def log_maintenance_completion(completed_date: str, category: str, task_name: st
     except Exception:
         logger.exception("failed to sync maintenance completion (%s) to Google Sheets", task_name)
         return False
+
+
+# --- Supply/parts purchases -- same upsert-by-id shape as bills above ---
+
+SUPPLIES_HEADER = ["purchase_id", "status", "supplier_name", "date", "branch", "total_cost", "source_photos", "created_at", "verified_at", "verified_by"]
+SUPPLY_LINE_ITEMS_HEADER = ["purchase_id", "line_item_number", "description", "category", "quantity", "unit", "unit_price", "cost"]
+
+
+def _supplies_sheet():
+    sheet = _client_lazy().open_by_key(settings.supplies_sheet_id).sheet1
+    _ensure_header(sheet, SUPPLIES_HEADER)
+    return sheet
+
+
+def _supply_line_items_sheet():
+    sheet = _client_lazy().open_by_key(settings.supply_line_items_sheet_id).sheet1
+    _ensure_header(sheet, SUPPLY_LINE_ITEMS_HEADER)
+    return sheet
+
+
+def upsert_supply_purchase(purchase: dict) -> None:
+    sheet = _supplies_sheet()
+    values = [purchase.get(col, "") for col in SUPPLIES_HEADER]
+    existing = sheet.find(purchase["purchase_id"], in_column=1)
+    if existing is not None:
+        sheet.update(
+            f"A{existing.row}:{gspread.utils.rowcol_to_a1(existing.row, len(SUPPLIES_HEADER))}",
+            [values],
+            value_input_option="USER_ENTERED",
+        )
+    else:
+        sheet.append_row(values, value_input_option="USER_ENTERED")
+
+
+def replace_supply_line_items(purchase_id: str, line_items: list[dict]) -> None:
+    sheet = _supply_line_items_sheet()
+    existing_cells = sheet.findall(purchase_id, in_column=1)
+    if existing_cells:
+        for cell in sorted(existing_cells, key=lambda c: c.row, reverse=True):
+            sheet.delete_rows(cell.row)
+    if not line_items:
+        return
+    rows = [[purchase_id] + [item.get(col, "") for col in SUPPLY_LINE_ITEMS_HEADER[1:]] for item in line_items]
+    sheet.append_rows(rows, value_input_option="USER_ENTERED")
+
+
+def sync_verified_supply_purchase(purchase: dict) -> bool:
+    """Writes one verified supply purchase + its line items to the real
+    Sheets. Same reasoning as sync_verified_bill: doesn't raise on
+    failure, SQLite stays the source of truth either way."""
+    try:
+        upsert_supply_purchase(purchase)
+        replace_supply_line_items(purchase["purchase_id"], purchase.get("line_items") or [])
+        logger.info("synced supply purchase %s to Google Sheets OK", purchase.get("purchase_id"))
+        return True
+    except Exception:
+        logger.exception("failed to sync supply purchase %s to Google Sheets", purchase.get("purchase_id"))
+        return False

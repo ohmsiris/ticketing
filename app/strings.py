@@ -376,6 +376,29 @@ def bill_unsupported_file() -> str:
     return "รองรับเฉพาะรูปถ่ายบิล หรือไฟล์ PDF นะครับ ไฟล์นี้ยังไม่รองรับ"
 
 
+# --- Supply/parts purchase tracking (see app/supplies.py, app/supply_extraction.py) ---
+
+
+def supply_purchase_ready_for_review(purchase: dict, review_url: str, note: str | None = None) -> str:
+    lines = [
+        "✅ บิลซื้ออะไหล่ใหม่พร้อมตรวจสอบ",
+        f"ร้าน: {purchase.get('supplier_name') or '(ไม่ทราบ)'}",
+        f"สาขา: {purchase.get('branch') or '(ไม่ทราบ)'}",
+        f"ยอดรวม: {purchase.get('total_cost') or 0} บาท",
+    ]
+    if note:
+        lines.append(f"⚠️ {note}")
+    lines.append(f"ตรวจสอบที่: {review_url}")
+    return "\n".join(lines)
+
+
+# --- Photo-type disambiguation (see _send_document_type_picker in app/webhook_handler.py) ---
+
+
+def document_type_picker_prompt() -> str:
+    return "ไม่แน่ใจว่าเป็นเอกสารประเภทไหนครับ เลือกได้เลย"
+
+
 def bill_extraction_failed() -> str:
     return "อ่านบิลนี้ไม่สำเร็จ ลองส่งใหม่อีกครั้ง หรือถ่ายรูปให้ชัดขึ้นนะครับ"
 

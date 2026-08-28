@@ -8,18 +8,24 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from app import bills, conversation, maintenance, sheets_client, slips, strings, tickets
+from app import bills, conversation, maintenance, sheets_client, slips, supplies, strings, tickets
 from app.bill_extraction import extract_bill
 from app.classifier import classify
 from app.config import TIMEZONE, settings
 from app.image_classifier import classify_image
 from app.line_client import QuickReplyOption, download_message_content, push_message, reply_message
 from app.slip_extraction import extract_slip
+from app.supply_extraction import extract_supply_purchase
 
 logger = logging.getLogger("ticketing.webhook")
 
 ONBOARDING_TICKET_THRESHOLD = 3  # mom gets onboarding copy for tickets 1-3
 BANGKOK = ZoneInfo(TIMEZONE)
+DOCUMENT_TYPE_COMMAND_PREFIX = "เอกสาร:"  # see _send_document_type_picker / _handle_document_type_confirmation
+
+
+def _line_user_id_for(reporter: str) -> str:
+    return settings.ohm_line_user_id if reporter == "ohm" else settings.mom_line_user_id
 
 
 def _bangkok_date_str(iso_utc: str) -> str:
@@ -114,6 +120,16 @@ def handle_message_event(event: dict) -> None:
         return
     if reporter == "ohm" and stripped == "งานทั้งหมด":
         reply_message(reply_token, [strings.all_open_tickets_digest(tickets.get_all_open_tickets_by_due_date())])
+        return
+
+    # A tap on the photo-type disambiguation picker (see
+    # _handle_photo_message) arrives as an ordinary text message, same
+    # mechanism as the ticket close/cancel pickers -- but unlike those,
+    # there's no ticket id in the database to act on here, just a photo
+    # that needs re-fetching. Checked before anything else text-related,
+    # same reasoning as the on-demand commands above.
+    if stripped.startswith(DOCUMENT_TYPE_COMMAND_PREFIX):
+        _handle_document_type_confirmation(reporter, stripped, reply_token)
         return
 
     # awaiting_due_date: is THIS sender's own ticket-creation flow mid a
@@ -442,17 +458,22 @@ def _handle_photo_message(reporter: str, message: dict, is_group: bool, reply_to
     """
     Shared entry point for every image/file message -- works out the media
     type, sends one immediate ack, downloads the file once, then asks
-    app.image_classifier.classify_image() whether it's a repair bill or a
-    payment slip before handing off to the matching flow. "unclear" falls
-    back to the bill flow, today's ONLY behavior before this classifier
-    existed -- a misclassification never regresses bill handling that
-    already works, it just means a genuine slip that gets misread needs a
-    manual nudge, same as any other misread bill would.
+    app.image_classifier.classify_image() whether it's a repair bill, a
+    payment slip, or a supply-purchase bill before handing off to the
+    matching flow. "unclear" falls back to the bill flow, today's ONLY
+    behavior before this classifier existed -- a misclassification never
+    regresses bill handling that already works. When it's confidently one
+    of the three real types, route straight there; when it's genuinely
+    torn between two of them (confidence == "low"), ask via a tap-to-
+    choose picker instead of guessing -- see _send_document_type_picker.
 
     Deliberately never replies into a group/room (is_group) beyond the
     unsupported-file case -- whatever happens after that, the outcome goes
     as a PRIVATE push to the manager (OHM_LINE_USER_ID), regardless of who
-    sent the photo or where. See _handle_bill_message / _handle_slip_message.
+    sent the photo or where. See _handle_bill_message / _handle_slip_message
+    / _handle_supply_purchase_message. The disambiguation picker is
+    likewise skipped in groups -- just uses the best guess there, same as
+    "unclear" always has.
     """
     message_id = message.get("id")
     message_type = message.get("type")
@@ -488,13 +509,64 @@ def _handle_photo_message(reporter: str, message: dict, is_group: bool, reply_to
         )
         return
 
-    doc_type = classify_image(file_bytes, media_type)
-    logger.info("classified message_id=%s as %s", message_id, doc_type)
+    classification = classify_image(file_bytes, media_type)
+    logger.info(
+        "classified message_id=%s as %s (confidence=%s)",
+        message_id, classification.document_type, classification.confidence,
+    )
 
+    if classification.document_type != "unclear" and classification.confidence == "low" and not is_group:
+        _send_document_type_picker(reporter, message_id, media_type)
+        return
+
+    _route_photo_by_type(reporter, classification.document_type, message_id, file_bytes, media_type, is_group, reply_token)
+
+
+def _route_photo_by_type(
+    reporter: str, doc_type: str, message_id: str, file_bytes: bytes, media_type: str, is_group: bool, reply_token: str
+) -> None:
     if doc_type == "payment_slip":
         _handle_slip_message(reporter, message_id, file_bytes, is_group, reply_token)
+    elif doc_type == "supply_purchase":
+        _handle_supply_purchase_message(reporter, message_id, file_bytes, media_type, is_group, reply_token)
     else:
         _handle_bill_message(reporter, message_id, file_bytes, media_type, is_group, reply_token)
+
+
+def _send_document_type_picker(reporter: str, message_id: str, media_type: str) -> None:
+    """
+    Pushed (not replied -- the one-time reply token is already spent on
+    the "processing your photo" ack sent moments ago in
+    _handle_photo_message) to whichever of Ohm/Mom sent the photo.
+    Tapping a button sends the encoded command text as an ordinary
+    message, intercepted in handle_message_event before it ever reaches
+    the text classifier -- see _handle_document_type_confirmation, which
+    re-downloads the photo via message_id rather than trying to persist
+    the bytes anywhere in the meantime.
+    """
+    options = [("บิลซ่อมรถ", "repair_bill"), ("สลิปโอนเงิน", "payment_slip"), ("บิลซื้ออะไหล่", "supply_purchase")]
+    quick_reply = [
+        QuickReplyOption(label=label, text=f"{DOCUMENT_TYPE_COMMAND_PREFIX}{doc_type}:{media_type}:{message_id}")
+        for label, doc_type in options
+    ]
+    push_message(_line_user_id_for(reporter), [strings.document_type_picker_prompt()], quick_reply=quick_reply)
+
+
+def _handle_document_type_confirmation(reporter: str, command: str, reply_token: str) -> None:
+    try:
+        _, doc_type, media_type, message_id = command.split(":", 3)
+    except ValueError:
+        logger.warning("malformed document-type confirmation command: %r", command)
+        return
+
+    try:
+        file_bytes = download_message_content(message_id)
+    except Exception:
+        logger.exception("failed to re-download message_id=%s for document-type confirmation", message_id)
+        reply_message(reply_token, [strings.bill_extraction_failed()])
+        return
+
+    _route_photo_by_type(reporter, doc_type, message_id, file_bytes, media_type, is_group=False, reply_token=reply_token)
 
 
 def _handle_bill_message(
@@ -607,6 +679,60 @@ def _handle_slip_message(
     review_url = f"{settings.public_base_url}/slips/{slip_id}?token={settings.review_token}"
     logger.info("slip %s ready for review, notifying manager: %s", slip_id, review_url)
     push_message(settings.ohm_line_user_id, [strings.slip_ready_for_review(slip, review_url)])
+
+
+def _handle_supply_purchase_message(
+    reporter: str, message_id: str, file_bytes: bytes, media_type: str, is_group: bool, reply_token: str
+) -> None:
+    """
+    Extracts a photographed supplier bill for parts/supplies (bytes
+    already downloaded by _handle_photo_message) and files it for review.
+    Same shape as _handle_bill_message (multi-page chaining via
+    supplies.find_open_chain, same never-reply-into-a-group rule), no
+    vehicle-roster-match warning since this isn't tied to one vehicle.
+    """
+    try:
+        extracted = extract_supply_purchase(file_bytes, media_type)
+    except Exception:
+        logger.exception("supply purchase extraction failed for message_id=%s from %s", message_id, reporter)
+        if not is_group:
+            reply_message(reply_token, [strings.bill_extraction_failed()])
+        push_message(
+            settings.ohm_line_user_id,
+            [f"⚠️ อ่านบิลซื้ออะไหล่ไม่สำเร็จ (จาก {reporter}, message_id={message_id}) เช็ค log ดูนะครับ"],
+        )
+        return
+
+    logger.info(
+        "extracted OK: supplier=%r total=%r items=%d continues_next_page=%s",
+        extracted.get("supplier_name"), extracted.get("total_cost"),
+        len(extracted.get("line_items") or []), extracted.get("continues_next_page"),
+    )
+
+    note = None
+    open_chain = supplies.find_open_chain(reporter)
+    if open_chain is not None:
+        logger.info("merging into open chain %s", open_chain["purchase_id"])
+        result = supplies.append_page_to_chain(open_chain["purchase_id"], extracted, message_id)
+        purchase = result["purchase"]
+        if not result["totals_reconciled"]:
+            note = strings.bill_totals_mismatch_note(result["combined_sum"], result["final_total"])
+            logger.warning(
+                "supply purchase %s totals mismatch: combined=%s final=%s",
+                purchase["purchase_id"], result["combined_sum"], result["final_total"],
+            )
+    else:
+        purchase_id = supplies.create_purchase(reporter, extracted, message_id)
+        purchase = supplies.get_purchase(purchase_id)
+        logger.info("created new supply purchase %s from %s", purchase_id, reporter)
+
+    if purchase.get("continues_next_page"):
+        logger.info("supply purchase %s still awaiting next page from %s", purchase["purchase_id"], reporter)
+        return
+
+    review_url = f"{settings.public_base_url}/supplies/{purchase['purchase_id']}?token={settings.review_token}"
+    logger.info("supply purchase %s ready for review, notifying manager: %s", purchase["purchase_id"], review_url)
+    push_message(settings.ohm_line_user_id, [strings.supply_purchase_ready_for_review(purchase, review_url, note)])
 
 
 def _ticket_picker_label(ticket: dict) -> str:

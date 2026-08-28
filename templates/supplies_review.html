@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>ตรวจสอบ {{ purchase.purchase_id }}</title>
+    <link rel="stylesheet" href="/static/bills.css">
+</head>
+<body>
+    <div class="page">
+        <a class="back-link" href="/supplies?token={{ token }}">&larr; กลับไปหน้ารายการบิลซื้ออะไหล่</a>
+        <h1>{{ purchase.purchase_id }}
+            <span class="badge badge-{{ purchase.status }}">
+                {{ "ยืนยันแล้ว" if purchase.status == "verified" else "รอตรวจสอบ" }}
+            </span>
+        </h1>
+        <p class="subtitle">อ่านจาก: {{ purchase.source_photos }}</p>
+
+        <form method="POST" action="/supplies/{{ purchase.purchase_id }}?token={{ token }}" id="review-form">
+            <input type="hidden" name="row_ids" id="row_ids">
+
+            <h2>รายละเอียดบิล</h2>
+            <div class="field-grid">
+                <label>ชื่อร้าน
+                    <input type="text" name="supplier_name" value="{{ purchase.supplier_name or '' }}">
+                </label>
+                <label>วันที่
+                    <input type="text" name="date" value="{{ purchase.date or '' }}">
+                </label>
+                <label>สาขา
+                    <input type="text" name="branch" value="{{ purchase.branch or '' }}">
+                </label>
+            </div>
+
+            <h2>รายการอะไหล่/วัสดุ</h2>
+            <table id="line-items-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th class="flag-field">รายละเอียด (ตรวจสอบอีกครั้ง)</th>
+                        <th>หมวดหมู่</th>
+                        <th>จำนวน</th>
+                        <th>หน่วย</th>
+                        <th>ราคาต่อหน่วย</th>
+                        <th>ราคารวม</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="line-items-body">
+                    {% for item in purchase.line_items %}
+                    <tr data-row-id="{{ item.id }}">
+                        <td class="row-number"></td>
+                        <td><input type="text" name="description_{{ item.id }}" value="{{ item.description or '' }}"></td>
+                        <td>
+                            <select name="category_{{ item.id }}">
+                                {% for cat in categories %}
+                                <option value="{{ cat }}" {% if cat == item.category %}selected{% endif %}>{{ cat }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td><input type="text" class="narrow" name="quantity_{{ item.id }}" value="{{ item.quantity or '' }}"></td>
+                        <td><input type="text" class="narrow" name="unit_{{ item.id }}" value="{{ item.unit or '' }}"></td>
+                        <td><input type="text" class="narrow" name="unit_price_{{ item.id }}" value="{{ item.unit_price or '' }}"></td>
+                        <td><input type="text" class="narrow" name="cost_{{ item.id }}" value="{{ item.cost or '' }}"></td>
+                        <td><button type="button" class="row-remove" onclick="removeRow('{{ item.id }}')">ลบ</button></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div class="add-row-wrap">
+                <button type="button" class="secondary-button" onclick="addRow()">+ เพิ่มรายการ</button>
+            </div>
+
+            <div class="total-row">
+                <label>ยอดรวม
+                    <input type="text" name="total_cost" id="total_cost" class="total-input" value="{{ purchase.total_cost }}">
+                </label>
+                <span class="total-hint">คำนวณอัตโนมัติจากราคารวมแต่ละรายการด้านบน -- แก้เองได้ถ้ายอดจริงต่างจากนี้ (เช่น มี VAT/ส่วนลด)</span>
+            </div>
+
+            <div class="submit-row">
+                <button type="submit">ยืนยันและบันทึก</button>
+            </div>
+        </form>
+
+        {% if purchase.status == "verified" %}
+        <p class="verified-note">ยืนยันเมื่อ {{ purchase.verified_at }} โดย {{ purchase.verified_by }}</p>
+        {% endif %}
+    </div>
+
+    <script>
+        const CATEGORIES = {{ categories | tojson }};
+
+        // New rows use a "new"-prefixed id, never a plain number -- real
+        // rows are keyed by their SQLite id (a global autoincrement, not
+        // reset per purchase), so a plain numeric counter here could
+        // someday collide with a real one. Same convention as review.html.
+        let newRowCounter = 1;
+
+        function categoryOptions(selectedValue) {
+            return CATEGORIES.map(function (cat) {
+                const selected = cat === selectedValue ? " selected" : "";
+                return `<option value="${cat}"${selected}>${cat}</option>`;
+            }).join("");
+        }
+
+        function addRow() {
+            const rowId = "new" + (newRowCounter++);
+            const tbody = document.getElementById("line-items-body");
+            const tr = document.createElement("tr");
+            tr.dataset.rowId = rowId;
+            tr.innerHTML = `
+                <td class="row-number"></td>
+                <td><input type="text" name="description_${rowId}" value=""></td>
+                <td><select name="category_${rowId}">${categoryOptions("")}</select></td>
+                <td><input type="text" class="narrow" name="quantity_${rowId}" value=""></td>
+                <td><input type="text" class="narrow" name="unit_${rowId}" value=""></td>
+                <td><input type="text" class="narrow" name="unit_price_${rowId}" value=""></td>
+                <td><input type="text" class="narrow" name="cost_${rowId}" value=""></td>
+                <td><button type="button" class="row-remove" onclick="removeRow('${rowId}')">ลบ</button></td>
+            `;
+            tbody.appendChild(tr);
+            refreshRowState();
+            recalcTotal();
+            tr.querySelector("input").focus();
+        }
+
+        function removeRow(rowId) {
+            const tr = document.querySelector(`tr[data-row-id="${rowId}"]`);
+            if (tr) tr.remove();
+            refreshRowState();
+            recalcTotal();
+        }
+
+        // Whole numbers stay whole, otherwise keep up to 2 decimal places
+        // -- same convention as review.html.
+        function formatMoney(n) {
+            return Number.isInteger(n) ? String(n) : n.toFixed(2);
+        }
+
+        function recalcTotal() {
+            const costInputs = document.querySelectorAll('#line-items-body input[name^="cost_"]');
+            let sum = 0;
+            costInputs.forEach(function (input) {
+                const value = parseFloat(input.value);
+                if (!isNaN(value)) sum += value;
+            });
+            document.getElementById("total_cost").value = formatMoney(sum);
+        }
+
+        function recalcRowCost(row) {
+            const quantityInput = row.querySelector('input[name^="quantity_"]');
+            const unitPriceInput = row.querySelector('input[name^="unit_price_"]');
+            const costInput = row.querySelector('input[name^="cost_"]');
+            const quantity = parseFloat(quantityInput.value);
+            const unitPrice = parseFloat(unitPriceInput.value);
+            if (quantity > 0 && !isNaN(unitPrice)) {
+                costInput.value = formatMoney(quantity * unitPrice);
+                recalcTotal();
+            }
+        }
+
+        function refreshRowState() {
+            const rows = document.querySelectorAll("#line-items-body tr");
+            const ids = [];
+            rows.forEach(function (tr, index) {
+                tr.querySelector(".row-number").textContent = index + 1;
+                ids.push(tr.dataset.rowId);
+            });
+            document.getElementById("row_ids").value = ids.join(",");
+        }
+
+        refreshRowState();
+        document.getElementById("line-items-body").addEventListener("input", function (e) {
+            const name = e.target.name || "";
+            if (name.startsWith("quantity_") || name.startsWith("unit_price_")) {
+                recalcRowCost(e.target.closest("tr"));
+            } else if (name.startsWith("cost_")) {
+                recalcTotal();
+            }
+        });
+    </script>
+</body>
+</html>

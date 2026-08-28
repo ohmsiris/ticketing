@@ -62,15 +62,17 @@ class QuickReplyOption(NamedTuple):
     text: str  # sent as a normal text message (as if typed) when tapped
 
 
-def reply_message(reply_token: str, texts: list[str], quick_reply: Optional[list[QuickReplyOption]] = None) -> None:
-    """
-    quick_reply: tappable buttons attached to the last bubble. Tapping one
-    just sends `text` as an ordinary message from the user -- it goes
+def _attach_quick_reply(messages: list[dict], quick_reply: Optional[list[QuickReplyOption]]) -> list[dict]:
+    """quick_reply: tappable buttons attached to the last bubble. Tapping
+    one just sends `text` as an ordinary message from the user -- it goes
     through the normal webhook -> classify() flow like anything typed by
-    hand, so no separate postback handling is needed. Used for the
-    tap-to-close ticket picker (see webhook_handler.py).
-    """
-    messages = _as_messages(texts)
+    hand, so no separate postback handling is needed. Works identically
+    whether the message carrying it is a reply or a push -- quickReply is
+    a property of the message object itself, not tied to which API sends
+    it (see push_message's use of this for the photo-type disambiguation
+    picker in webhook_handler.py, where the one-time reply token is
+    already spent on the immediate "processing your photo" ack by the
+    time we'd know whether to ask)."""
     if quick_reply and messages:
         messages[-1]["quickReply"] = {
             "items": [
@@ -78,15 +80,21 @@ def reply_message(reply_token: str, texts: list[str], quick_reply: Optional[list
                 for opt in quick_reply[:13]  # LINE's own cap on quick reply items
             ]
         }
+    return messages
+
+
+def reply_message(reply_token: str, texts: list[str], quick_reply: Optional[list[QuickReplyOption]] = None) -> None:
+    messages = _attach_quick_reply(_as_messages(texts), quick_reply)
     payload = {"replyToken": reply_token, "messages": messages}
     _post(REPLY_URL, payload)
 
 
-def push_message(user_id: str, texts: list[str]) -> None:
+def push_message(user_id: str, texts: list[str], quick_reply: Optional[list[QuickReplyOption]] = None) -> None:
     if not user_id:
         logger.warning("push_message called with no user_id configured -- skipping send")
         return
-    payload = {"to": user_id, "messages": _as_messages(texts)}
+    messages = _attach_quick_reply(_as_messages(texts), quick_reply)
+    payload = {"to": user_id, "messages": messages}
     _post(PUSH_URL, payload)
 
 

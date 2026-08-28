@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>บิลซื้ออะไหล่</title>
+    <link rel="stylesheet" href="/static/bills.css">
+</head>
+<body>
+    <div class="page">
+        <h1>บิลซื้ออะไหล่</h1>
+        <p class="subtitle">รายการซื้ออะไหล่/วัสดุที่ระบบอ่านแล้ว — คลิกที่รายการเพื่อตรวจสอบและยืนยัน</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>รหัส</th>
+                    <th>ร้าน</th>
+                    <th>วันที่</th>
+                    <th>สาขา</th>
+                    <th>ยอดรวม</th>
+                    <th>สถานะ</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for purchase in purchases %}
+                <tr>
+                    <td>{{ purchase.purchase_id }}</td>
+                    <td>{{ purchase.supplier_name }}</td>
+                    <td>{{ purchase.date }}</td>
+                    <td>{{ purchase.branch }}</td>
+                    <td class="num">{{ purchase.total_cost }}</td>
+                    <td>
+                        <span class="badge badge-{{ purchase.status }}">
+                            {{ "ยืนยันแล้ว" if purchase.status == "verified" else "รอตรวจสอบ" }}
+                        </span>
+                    </td>
+                    <td><a class="button" href="/supplies/{{ purchase.purchase_id }}?token={{ token }}">
+                        {{ "ดู" if purchase.status == "verified" else "ตรวจสอบ" }}
+                    </a></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="empty-note">ยังไม่มีบิลซื้ออะไหล่เข้ามาในระบบ</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
