@@ -179,6 +179,31 @@ def append_page_to_chain(bill_id: str, extracted: dict, source_photo_id: str) ->
     }
 
 
+def finalize_chain(bill_id: str, reporter: str) -> Optional[dict]:
+    """Force-closes a still-open chain (continues_next_page=1) without
+    waiting for another page to arrive -- for when the sender explicitly
+    says there isn't one (see FINALIZE_CHAIN_COMMAND_PREFIX in
+    app/webhook_handler.py). Scoped to bills this reporter actually owns
+    AND still genuinely open, so a stale/duplicate button tap can't
+    reopen or re-finalize something a next page (or a manual review-page
+    edit) already resolved in the meantime. Returns the updated bill, or
+    None if there was nothing matching left to finalize."""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT bill_id FROM bills WHERE bill_id = ? AND reporter = ? "
+            "AND continues_next_page = 1 AND status = 'pending_review'",
+            (bill_id, reporter),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute("UPDATE bills SET continues_next_page = 0 WHERE bill_id = ?", (bill_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return get_bill(bill_id)
+
+
 def get_bill(bill_id: str) -> Optional[dict]:
     conn = get_conn()
     try:

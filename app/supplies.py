@@ -230,6 +230,32 @@ def append_page_to_chain(purchase_id: str, extracted: dict, source_photo_id: str
     }
 
 
+def finalize_chain(purchase_id: str, reporter: str) -> Optional[dict]:
+    """Force-closes a still-open chain (continues_next_page=1) without
+    waiting for another page to arrive -- for when the sender explicitly
+    says there isn't one (see FINALIZE_CHAIN_COMMAND_PREFIX in
+    app/webhook_handler.py). Same scoping/safety reasoning as
+    bills.finalize_chain -- scoped to purchases this reporter actually
+    owns AND still genuinely open, so a stale/duplicate button tap can't
+    reopen or re-finalize something already resolved. Returns the
+    updated purchase, or None if there was nothing matching left to
+    finalize."""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT purchase_id FROM supply_purchases WHERE purchase_id = ? AND reporter = ? "
+            "AND continues_next_page = 1 AND status = 'pending_review'",
+            (purchase_id, reporter),
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute("UPDATE supply_purchases SET continues_next_page = 0 WHERE purchase_id = ?", (purchase_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return get_purchase(purchase_id)
+
+
 def get_purchase(purchase_id: str) -> Optional[dict]:
     conn = get_conn()
     try:

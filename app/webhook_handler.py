@@ -22,6 +22,7 @@ logger = logging.getLogger("ticketing.webhook")
 ONBOARDING_TICKET_THRESHOLD = 3  # mom gets onboarding copy for tickets 1-3
 BANGKOK = ZoneInfo(TIMEZONE)
 DOCUMENT_TYPE_COMMAND_PREFIX = "เอกสาร:"  # see _send_document_type_picker / _handle_document_type_confirmation
+FINALIZE_CHAIN_COMMAND_PREFIX = "จบบิล:"  # see _handle_finalize_chain_command
 
 
 def _line_user_id_for(reporter: str) -> str:
@@ -130,6 +131,14 @@ def handle_message_event(event: dict) -> None:
     # same reasoning as the on-demand commands above.
     if stripped.startswith(DOCUMENT_TYPE_COMMAND_PREFIX):
         _handle_document_type_confirmation(reporter, stripped, reply_token)
+        return
+
+    # A tap on the "no more pages" button attached to an awaiting-next-
+    # page notification (see _handle_bill_message / _handle_supply_
+    # purchase_message) -- same interception pattern as the two commands
+    # above, checked before anything text-classification-related.
+    if stripped.startswith(FINALIZE_CHAIN_COMMAND_PREFIX):
+        _handle_finalize_chain_command(reporter, stripped, reply_token)
         return
 
     # awaiting_due_date: is THIS sender's own ticket-creation flow mid a
@@ -610,6 +619,43 @@ def _handle_document_type_confirmation(reporter: str, command: str, reply_token:
     _route_photo_by_type(reporter, doc_type, message_id, file_bytes, media_type, is_group=False, reply_token=reply_token)
 
 
+def _handle_finalize_chain_command(reporter: str, command: str, reply_token: str) -> None:
+    """
+    A tap on the "ไม่มีหน้าต่อแล้ว" button attached to an awaiting-next-
+    page notification -- force-closes that specific chain with whatever
+    pages it already has, then runs the exact same "ready for review"
+    notification the normal flow would send once a real final page
+    arrives. See bills.finalize_chain / supplies.finalize_chain for the
+    scoping/safety rules (only the sender's own still-open chain can be
+    closed this way -- a stale tap on an already-resolved chain, e.g. the
+    real next page arrived in the meantime, is a no-op with a clear
+    reply, not a silent double-notification or a crash).
+    """
+    try:
+        payload = command[len(FINALIZE_CHAIN_COMMAND_PREFIX):]
+        doc_type, chain_id = payload.split(":", 1)
+    except ValueError:
+        logger.warning("malformed finalize-chain command: %r", command)
+        return
+
+    if doc_type == "bill":
+        bill = bills.finalize_chain(chain_id, reporter)
+        if bill is None:
+            reply_message(reply_token, [strings.finalize_chain_not_found()])
+            return
+        reply_message(reply_token, [strings.finalize_chain_confirmed()])
+        _notify_bill_ready_for_review(bill, strings.chain_force_closed_note())
+    elif doc_type == "supply":
+        purchase = supplies.finalize_chain(chain_id, reporter)
+        if purchase is None:
+            reply_message(reply_token, [strings.finalize_chain_not_found()])
+            return
+        reply_message(reply_token, [strings.finalize_chain_confirmed()])
+        _notify_supply_purchase_ready_for_review(purchase, strings.chain_force_closed_note())
+    else:
+        logger.warning("unknown finalize-chain doc_type in command: %r", command)
+
+
 def _handle_bill_message(
     reporter: str, message_id: str, file_bytes: bytes, media_type: str, is_group: bool, reply_token: str
 ) -> None:
@@ -663,12 +709,30 @@ def _handle_bill_message(
         logger.info("created new bill %s from %s", bill_id, reporter)
 
     if bill.get("continues_next_page"):
-        # Still an open chain awaiting its next page -- don't notify yet,
-        # the next photo (or the 30-minute staleness window) decides
-        # what happens next. See bills.find_open_chain.
+        # Still an open chain awaiting its next page -- the sender gets
+        # told this explicitly (used to be a silent return here: nothing
+        # sent, nothing logged anywhere they could see, so "still waiting
+        # for another page" was indistinguishable from "broke silently").
+        # A quick-reply lets them force it closed right now if there
+        # genuinely isn't a next page coming -- see
+        # _handle_finalize_chain_command. Next photo (or the 30-minute
+        # staleness window) is still the normal path; this is just the
+        # escape hatch. See bills.find_open_chain.
         logger.info("bill %s still awaiting next page from %s", bill["bill_id"], reporter)
+        quick_reply = [QuickReplyOption(
+            label=strings.FINALIZE_CHAIN_BUTTON_LABEL,
+            text=f"{FINALIZE_CHAIN_COMMAND_PREFIX}bill:{bill['bill_id']}",
+        )]
+        push_message(_line_user_id_for(reporter), [strings.bill_awaiting_next_page(bill)], quick_reply=quick_reply)
         return
 
+    _notify_bill_ready_for_review(bill, note)
+
+
+def _notify_bill_ready_for_review(bill: dict, note: str | None) -> None:
+    """Shared by the normal extraction flow above and
+    _handle_finalize_chain_command (manually force-closing a chain that
+    never got its next page)."""
     # Fold in the deterministic roster-match warning (e.g. "vehicle number
     # not found") from bill_extraction.py alongside any totals-mismatch
     # note, so the manager sees everything worth double-checking in one
@@ -770,9 +834,25 @@ def _handle_supply_purchase_message(
         logger.info("created new supply purchase %s from %s", purchase_id, reporter)
 
     if purchase.get("continues_next_page"):
+        # See _handle_bill_message's identical branch for why this pushes
+        # a visible message + escape-hatch button instead of silently
+        # returning.
         logger.info("supply purchase %s still awaiting next page from %s", purchase["purchase_id"], reporter)
+        quick_reply = [QuickReplyOption(
+            label=strings.FINALIZE_CHAIN_BUTTON_LABEL,
+            text=f"{FINALIZE_CHAIN_COMMAND_PREFIX}supply:{purchase['purchase_id']}",
+        )]
+        push_message(
+            _line_user_id_for(reporter), [strings.supply_purchase_awaiting_next_page(purchase)], quick_reply=quick_reply
+        )
         return
 
+    _notify_supply_purchase_ready_for_review(purchase, note)
+
+
+def _notify_supply_purchase_ready_for_review(purchase: dict, note: str | None) -> None:
+    """Shared by the normal extraction flow above and
+    _handle_finalize_chain_command."""
     review_url = f"{settings.public_base_url}/supplies/{purchase['purchase_id']}?token={settings.review_token}"
     logger.info("supply purchase %s ready for review, notifying manager: %s", purchase["purchase_id"], review_url)
     push_message(settings.ohm_line_user_id, [strings.supply_purchase_ready_for_review(purchase, review_url, note)])

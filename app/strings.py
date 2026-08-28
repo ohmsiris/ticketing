@@ -392,6 +392,44 @@ def supply_purchase_ready_for_review(purchase: dict, review_url: str, note: str 
     return "\n".join(lines)
 
 
+# --- Multi-page chains: awaiting-next-page visibility + the manual
+# "no more pages" escape hatch (see FINALIZE_CHAIN_COMMAND_PREFIX /
+# _handle_finalize_chain_command in app/webhook_handler.py). Before this,
+# a bill/purchase silently sitting in "awaiting next page" state was
+# completely invisible to the sender -- they had no way to tell "still
+# processing" apart from "broke, no output at all". ---
+
+FINALIZE_CHAIN_BUTTON_LABEL = "ไม่มีหน้าต่อแล้ว"
+
+
+def bill_awaiting_next_page(bill: dict) -> str:
+    shop = bill.get("shop_name") or "(ไม่ทราบชื่อร้าน)"
+    return (
+        f"📄 ได้รับรูปบิลจากร้าน {shop} แล้วครับ แต่ยังไม่เห็นยอดรวม ดูเหมือนบิลนี้จะมีต่ออีกหน้า\n"
+        "ส่งรูปหน้าถัดไปได้เลย หรือกดปุ่มด้านล่างถ้าไม่มีหน้าต่อแล้ว"
+    )
+
+
+def supply_purchase_awaiting_next_page(purchase: dict) -> str:
+    supplier = purchase.get("supplier_name") or "(ไม่ทราบชื่อร้าน)"
+    return (
+        f"📄 ได้รับรูปบิลซื้ออะไหล่จากร้าน {supplier} แล้วครับ แต่ยังไม่เห็นยอดรวม ดูเหมือนบิลนี้จะมีต่ออีกหน้า\n"
+        "ส่งรูปหน้าถัดไปได้เลย หรือกดปุ่มด้านล่างถ้าไม่มีหน้าต่อแล้ว"
+    )
+
+
+def finalize_chain_confirmed() -> str:
+    return "รับทราบครับ ปิดบิลตามที่มีอยู่ตอนนี้ และส่งให้ตรวจสอบแล้ว"
+
+
+def finalize_chain_not_found() -> str:
+    return "ไม่พบบิลที่รอหน้าต่ออยู่ตอนนี้ครับ (อาจถูกปิดไปแล้ว หรือมีหน้าต่อเข้ามาแล้ว)"
+
+
+def chain_force_closed_note() -> str:
+    return "ปิดบิลเองโดยไม่รอหน้าต่อ อาจไม่ครบทุกรายการ -- ตรวจสอบให้ดีก่อนยืนยัน"
+
+
 # --- Photo-type disambiguation (see _send_document_type_picker in app/webhook_handler.py) ---
 
 

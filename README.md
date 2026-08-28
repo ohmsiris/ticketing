@@ -202,6 +202,19 @@ list of `GOOGLE_SERVICE_ACCOUNT_JSON` / `BILLS_SHEET_ID` /
 needs -- the service account is a Google Cloud service account (JSON key,
 not a personal login), shared as an Editor on both Sheets.
 
+**Multi-page bills**: sending several photos of the same bill (LINE's
+multi-select gallery send, or one at a time) chains them together
+automatically -- send the next page within 30 minutes and it merges in.
+While a bill is still waiting on its next page, the sender gets told so
+explicitly ("ดูเหมือนบิลนี้จะมีต่ออีกหน้า") with a **"ไม่มีหน้าต่อแล้ว"**
+button -- tap it to close the bill with whatever's already been captured
+instead of waiting, useful when you only meant to send one page, or the
+model misread a page as incomplete when it wasn't. Same behavior for
+supply purchases below. If nobody taps that button and no next page
+shows up, the bill just sits reviewable as-is at `/bills?token=...` --
+nothing is ever silently lost, only silently *waiting* used to be
+invisible.
+
 ### Vehicle roster auto-refresh
 
 Bill matching (which truck a plate belongs to, catching a mismatched
