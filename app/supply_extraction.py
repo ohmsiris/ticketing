@@ -10,6 +10,23 @@ CATEGORIES is a first draft, not yet corrected against real bills the way
 bill_extraction.py's 16 repair categories were tuned in the standalone OCR
 project -- expect this list to need a review/correction round once real
 purchases start coming in, same as app/maintenance.py's DEFAULT_TASKS did.
+
+Each line item also gets a `canonical_part` field alongside the verbatim
+`description` -- the whole point of this feature per the user is "who
+sells this part cheapest", not stock tracking, so every purchase of the
+"same" part needs to land under one consistent name for the PartPrices
+Sheet to actually be comparable across suppliers/bills (see
+app/sheets_client.py's PART_PRICES_HEADER). This is Claude's best-effort
+normalization at extraction time, not a real matched-against-a-catalog
+system -- there's no canonical parts table, no fuzzy re-matching, nothing
+stopping the same real part from drifting to two slightly different
+canonical_part spellings over time. The reviewer can (and should) hand-fix
+canonical_part on the review page to keep it aligned with how the same
+part was named in an earlier purchase, same as any other field there. A
+real catalog-matching system (mirroring how maintenance.py matches
+free text against DEFAULT_TASKS by meaning) is a reasonable v2 if drift
+turns out to be a real problem in practice -- not built now since it's
+unproven whether it's actually needed yet.
 """
 import base64
 import json
@@ -118,6 +135,23 @@ EXTRACTION_SCHEMA = {
                         "type": "string",
                         "description": "The part/item description exactly as written on the bill, in the original language, word for word -- do not translate, paraphrase, reword, or 'clean up' the text. If a word is genuinely illegible, write [illegible] in place of that word rather than guessing.",
                     },
+                    "canonical_part": {
+                        "type": "string",
+                        "description": (
+                            "A short, normalized name for this exact part, used later to compare "
+                            "prices for the SAME part across different bills/suppliers -- so "
+                            "consistency matters more than style. Strip shop-specific phrasing, "
+                            "brand fluff, and unit/quantity words, but KEEP any part number, size, "
+                            "or spec that actually distinguishes it from a similar part (e.g. "
+                            "'สายพานพัดลม A47 ยี่ห้อ Bando 1 เส้น' -> 'สายพาน A47'; "
+                            "'ลูกปืนล้อหลัง เบอร์ 6205' -> 'ลูกปืน 6205'; "
+                            "'น้ำมันเครื่อง Shell Rimula 15W-40 ถัง 18 ลิตร' -> 'น้ำมันเครื่อง Rimula 15W-40'). "
+                            "Keep it in Thai (or the language the part number/spec is naturally written "
+                            "in), not translated. For a labor/service charge with no specific part, "
+                            "use the same value as description. Empty string only if description itself "
+                            "is empty."
+                        ),
+                    },
                     "cost": {
                         "type": "number",
                         "description": "Cost of this individual line item in Thai Baht. Use 0 if not itemized or not legible.",
@@ -128,7 +162,7 @@ EXTRACTION_SCHEMA = {
                         "description": "The single best-fit category for this line item. Use 'ค่าแรงและบริการ' for installation/service/delivery charges with no specific part named. Only use 'อื่นๆ' (Other) if nothing else genuinely fits.",
                     },
                 },
-                "required": ["quantity", "unit", "description", "cost", "category"],
+                "required": ["quantity", "unit", "description", "canonical_part", "cost", "category"],
                 "additionalProperties": False,
             },
         },
@@ -166,6 +200,13 @@ Read the line item table as a whole, column by column, the way it is laid \
 out on the bill (quantity column, description column, price column, etc.). \
 Transcribe descriptions verbatim -- do not reword, summarize, or "clean up" \
 the wording.
+
+Alongside each verbatim description, also produce canonical_part: a short \
+normalized name for that exact part, used later to compare prices for the \
+SAME part across different bills and suppliers. This is the one field \
+where consistency matters more than matching the bill's exact wording -- \
+strip shop-specific phrasing and brand fluff, but always keep any part \
+number, size, or spec that actually distinguishes it from a similar part.
 
 Some bills span more than one photo (the line items continue onto a second \
 page). Watch specifically for a handwritten or printed "ยอดยกไป" note, \

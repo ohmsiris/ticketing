@@ -194,7 +194,10 @@ CREATE TABLE IF NOT EXISTS supply_purchase_items (
     quantity           TEXT,
     unit               TEXT,
     unit_price         TEXT,
-    cost               TEXT
+    cost               TEXT,
+    canonical_part     TEXT  -- normalized part name for cross-supplier price comparison, e.g.
+                              -- "V-Belt A47" regardless of how each shop's bill phrases it -- see
+                              -- app/supply_extraction.py's EXTRACTION_SCHEMA and the PartPrices sheet
 );
 
 CREATE INDEX IF NOT EXISTS idx_supply_purchases_reporter_status ON supply_purchases (reporter, status);
@@ -247,3 +250,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     maint_columns = {row["name"] for row in conn.execute("PRAGMA table_info(maintenance_tasks)").fetchall()}
     if "notes" not in maint_columns:
         conn.execute("ALTER TABLE maintenance_tasks ADD COLUMN notes TEXT")
+
+    supply_item_columns = {row["name"] for row in conn.execute("PRAGMA table_info(supply_purchase_items)").fetchall()}
+    if "canonical_part" not in supply_item_columns:
+        conn.execute("ALTER TABLE supply_purchase_items ADD COLUMN canonical_part TEXT")

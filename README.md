@@ -353,6 +353,28 @@ Setup, in addition to everything bill tracking already needs:
    vars. Reuses `REVIEW_TOKEN` to gate `/supplies?token=...` -- no new
    token needed.
 
+**Comparing prices across suppliers (the actual point of this feature).**
+The user's real goal here isn't stock tracking -- it's knowing who sells a
+given part cheapest. Every line item gets a second name alongside its
+verbatim `description`: `canonical_part`, a normalized name Claude
+extracts (e.g. "สายพานพัดลม A47 ยี่ห้อ Bando 1 เส้น" -> "สายพาน A47") so
+the SAME part bought from different shops lands under one consistent
+name instead of however each bill happened to phrase it. This is
+best-effort at extraction time, not a real catalog-matching system --
+there's no canonical parts table and nothing stops drift over time, so
+the reviewer should double-check `canonical_part` matches how the same
+part was named in an earlier purchase (editable right there on the
+review page, same as any other field).
+
+A third, optional Sheet -- **PartPrices** -- is where this actually
+becomes useful: create it, share it as Editor with the service account,
+set `PART_PRICES_SHEET_ID`. Unlike Supplies/SupplyLineItems (an audit
+trail requiring a VLOOKUP between two sheets), PartPrices is one flat row
+per line item with the purchase's supplier/branch/date already joined in
+-- sort or filter by `canonical_part` and every price ever paid for that
+part is right there next to who charged it and when. Leave it blank to
+skip this sync; Supplies/SupplyLineItems still work fine without it.
+
 **Categories are a first draft.** `CATEGORIES` in `app/supply_extraction.py`
 (belts & chains, bearings & bushings, electrical, motors & pumps, seals &
 gaskets, piping, oils/lubricants, refrigerant, filters, fasteners, tools,

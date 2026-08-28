@@ -37,6 +37,7 @@
                     <tr>
                         <th>#</th>
                         <th class="flag-field">รายละเอียด (ตรวจสอบอีกครั้ง)</th>
+                        <th class="flag-field">ชื่อสำหรับเทียบราคา</th>
                         <th>หมวดหมู่</th>
                         <th>จำนวน</th>
                         <th>หน่วย</th>
@@ -50,6 +51,7 @@
                     <tr data-row-id="{{ item.id }}">
                         <td class="row-number"></td>
                         <td><input type="text" name="description_{{ item.id }}" value="{{ item.description or '' }}"></td>
+                        <td><input type="text" name="canonical_part_{{ item.id }}" value="{{ item.canonical_part or '' }}"></td>
                         <td>
                             <select name="category_{{ item.id }}">
                                 {% for cat in categories %}
@@ -69,6 +71,8 @@
             <div class="add-row-wrap">
                 <button type="button" class="secondary-button" onclick="addRow()">+ เพิ่มรายการ</button>
             </div>
+            <p class="total-hint">"ชื่อสำหรับเทียบราคา" ควรสะกดให้ตรงกับบิลอื่นๆ ของอะไหล่ชิ้นเดียวกัน (เช่น
+                เขียนว่า "สายพาน A47" เหมือนกันทุกครั้ง) ไม่งั้นระบบจะเปรียบเทียบราคาข้ามร้านให้ไม่ได้</p>
 
             <div class="total-row">
                 <label>ยอดรวม
@@ -111,6 +115,7 @@
             tr.innerHTML = `
                 <td class="row-number"></td>
                 <td><input type="text" name="description_${rowId}" value=""></td>
+                <td><input type="text" name="canonical_part_${rowId}" value=""></td>
                 <td><select name="category_${rowId}">${categoryOptions("")}</select></td>
                 <td><input type="text" class="narrow" name="quantity_${rowId}" value=""></td>
                 <td><input type="text" class="narrow" name="unit_${rowId}" value=""></td>

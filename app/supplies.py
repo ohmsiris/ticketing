@@ -52,13 +52,18 @@ def _insert_line_items(conn, purchase_id: str, items: list[dict], start: int = 1
     for i, item in enumerate(items, start=start):
         conn.execute(
             "INSERT INTO supply_purchase_items "
-            "(purchase_id, line_item_number, description, category, quantity, unit, unit_price, cost) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(purchase_id, line_item_number, description, category, quantity, unit, unit_price, cost, canonical_part) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 purchase_id, i, item.get("description", ""), item.get("category", ""),
                 item.get("quantity", ""), item.get("unit", ""),
                 item.get("unit_price") if "unit_price" in item else _unit_price(item),
                 item.get("cost", ""),
+                # Falls back to description when a caller (e.g. a manually
+                # added review-page row with no canonical_part input) doesn't
+                # supply one, rather than leaving it blank -- an ungrouped
+                # part still shows up under SOME name in the PartPrices sheet.
+                item.get("canonical_part") or item.get("description", ""),
             ),
         )
 

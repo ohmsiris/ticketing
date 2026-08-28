@@ -459,21 +459,28 @@ def _handle_photo_message(reporter: str, message: dict, is_group: bool, reply_to
     Shared entry point for every image/file message -- works out the media
     type, sends one immediate ack, downloads the file once, then asks
     app.image_classifier.classify_image() whether it's a repair bill, a
-    payment slip, or a supply-purchase bill before handing off to the
-    matching flow. "unclear" falls back to the bill flow, today's ONLY
-    behavior before this classifier existed -- a misclassification never
-    regresses bill handling that already works. When it's confidently one
-    of the three real types, route straight there; when it's genuinely
-    torn between two of them (confidence == "low"), ask via a tap-to-
-    choose picker instead of guessing -- see _send_document_type_picker.
+    payment slip, a supply-purchase bill, or not a document at all (see
+    that module's docstring for why that 4th case exists -- mechanics send
+    whole batches of photos together, most of which aren't the receipt).
+    When it's confidently one of those, route straight there (a confident
+    not_a_document is routed to _handle_non_document_photo, which just
+    skips it -- no extraction, no reply, no review-queue entry). When it's
+    genuinely unsure -- torn between two real types, OR unsure whether
+    this is even a document at all -- ask via a tap-to-choose picker
+    instead of guessing, see _send_document_type_picker. A classification
+    failure (the "unclear" sentinel, not a real document_type -- see
+    image_classifier.classify_image) falls back to the bill flow, the
+    long-standing safety net for "we don't actually know" that predates
+    this classifier entirely.
 
     Deliberately never replies into a group/room (is_group) beyond the
     unsupported-file case -- whatever happens after that, the outcome goes
     as a PRIVATE push to the manager (OHM_LINE_USER_ID), regardless of who
     sent the photo or where. See _handle_bill_message / _handle_slip_message
     / _handle_supply_purchase_message. The disambiguation picker is
-    likewise skipped in groups -- just uses the best guess there, same as
-    "unclear" always has.
+    likewise skipped in groups -- just uses the best guess there (falling
+    back to the bill flow on anything not confidently not_a_document,
+    same reasoning as a classification failure above).
     """
     message_id = message.get("id")
     message_type = message.get("type")
@@ -515,7 +522,12 @@ def _handle_photo_message(reporter: str, message: dict, is_group: bool, reply_to
         message_id, classification.document_type, classification.confidence,
     )
 
-    if classification.document_type != "unclear" and classification.confidence == "low" and not is_group:
+    # Ask whenever genuinely unsure -- torn between two real types, or
+    # unsure whether this is even a document -- never just for a confident
+    # not_a_document read (see _send_document_type_picker's 4th option for
+    # the case where the model WAS unsure and guessed not_a_document but
+    # was wrong). Groups never get asked, same as before this existed.
+    if classification.confidence == "low" and not is_group:
         _send_document_type_picker(reporter, message_id, media_type)
         return
 
@@ -529,8 +541,32 @@ def _route_photo_by_type(
         _handle_slip_message(reporter, message_id, file_bytes, is_group, reply_token)
     elif doc_type == "supply_purchase":
         _handle_supply_purchase_message(reporter, message_id, file_bytes, media_type, is_group, reply_token)
+    elif doc_type == "not_a_document":
+        _handle_non_document_photo(reporter, message_id)
     else:
+        # "repair_bill", or the "unclear" classification-failure sentinel --
+        # the long-standing safety net: never silently drop a photo we're
+        # not sure about, only ones we're confidently sure AREN'T a
+        # document (handled above).
         _handle_bill_message(reporter, message_id, file_bytes, media_type, is_group, reply_token)
+
+
+def _handle_non_document_photo(reporter: str, message_id: str) -> None:
+    """
+    A confident not_a_document read (or the human explicitly tapping "not
+    a bill" on the picker) -- a reference/context photo with nothing to
+    extract: a truck itself, someone mid-repair, an odometer, a
+    handwritten checklist with no cost figures. Deliberately a total
+    no-op beyond logging -- no reply (these routinely arrive in batches of
+    several alongside the real receipt; a "got it, not a bill" ping for
+    every one would be far noisier than useful), no DB row, no Sheets
+    sync, no push to the manager. If this turns out wrong for a specific
+    photo, the sender still has the real bill/slip/supply flow available
+    any time by sending that photo again and picking the right option
+    from the picker (confidence == "low" always asks, see
+    _handle_photo_message).
+    """
+    logger.info("message_id=%s from %s classified as not_a_document -- skipping, no action taken", message_id, reporter)
 
 
 def _send_document_type_picker(reporter: str, message_id: str, media_type: str) -> None:
@@ -544,7 +580,12 @@ def _send_document_type_picker(reporter: str, message_id: str, media_type: str) 
     re-downloads the photo via message_id rather than trying to persist
     the bytes anywhere in the meantime.
     """
-    options = [("บิลซ่อมรถ", "repair_bill"), ("สลิปโอนเงิน", "payment_slip"), ("บิลซื้ออะไหล่", "supply_purchase")]
+    options = [
+        ("บิลซ่อมรถ", "repair_bill"),
+        ("สลิปโอนเงิน", "payment_slip"),
+        ("บิลซื้ออะไหล่", "supply_purchase"),
+        ("ไม่ใช่บิล/สลิป", "not_a_document"),
+    ]
     quick_reply = [
         QuickReplyOption(label=label, text=f"{DOCUMENT_TYPE_COMMAND_PREFIX}{doc_type}:{media_type}:{message_id}")
         for label, doc_type in options

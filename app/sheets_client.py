@@ -253,7 +253,20 @@ def log_maintenance_completion(completed_date: str, category: str, task_name: st
 # --- Supply/parts purchases -- same upsert-by-id shape as bills above ---
 
 SUPPLIES_HEADER = ["purchase_id", "status", "supplier_name", "date", "branch", "total_cost", "source_photos", "created_at", "verified_at", "verified_by"]
-SUPPLY_LINE_ITEMS_HEADER = ["purchase_id", "line_item_number", "description", "category", "quantity", "unit", "unit_price", "cost"]
+SUPPLY_LINE_ITEMS_HEADER = ["purchase_id", "line_item_number", "description", "canonical_part", "category", "quantity", "unit", "unit_price", "cost"]
+
+# A separate, deliberately flat/denormalized sheet -- the actual point of
+# this whole feature per the user: "who sells this part cheapest", not an
+# audit trail. SupplyLineItems above needs a VLOOKUP into Supplies to see
+# which supplier/date a line item belongs to; this sheet already has those
+# columns joined in, so sorting/filtering by canonical_part directly shows
+# every price ever paid for that part, next to who charged it and when --
+# no formula-building required on the user's end. One row per line item,
+# same purchase_id-keyed replace-on-reverify as SupplyLineItems.
+PART_PRICES_HEADER = [
+    "canonical_part", "category", "description", "supplier_name", "branch", "date",
+    "quantity", "unit", "unit_price", "cost", "purchase_id", "line_item_number",
+]
 
 
 def _supplies_sheet():
@@ -265,6 +278,12 @@ def _supplies_sheet():
 def _supply_line_items_sheet():
     sheet = _client_lazy().open_by_key(settings.supply_line_items_sheet_id).sheet1
     _ensure_header(sheet, SUPPLY_LINE_ITEMS_HEADER)
+    return sheet
+
+
+def _part_prices_sheet():
+    sheet = _client_lazy().open_by_key(settings.part_prices_sheet_id).sheet1
+    _ensure_header(sheet, PART_PRICES_HEADER)
     return sheet
 
 
@@ -294,13 +313,46 @@ def replace_supply_line_items(purchase_id: str, line_items: list[dict]) -> None:
     sheet.append_rows(rows, value_input_option="USER_ENTERED")
 
 
+def replace_part_price_rows(purchase: dict, line_items: list[dict]) -> None:
+    """Same delete-then-reappend-by-key pattern as replace_supply_line_items,
+    keyed on purchase_id -- just in a different column here since
+    canonical_part leads the sheet instead (see PART_PRICES_HEADER)."""
+    sheet = _part_prices_sheet()
+    purchase_id_col = PART_PRICES_HEADER.index("purchase_id") + 1
+    existing_cells = sheet.findall(purchase["purchase_id"], in_column=purchase_id_col)
+    if existing_cells:
+        for cell in sorted(existing_cells, key=lambda c: c.row, reverse=True):
+            sheet.delete_rows(cell.row)
+    if not line_items:
+        return
+    joined = {
+        **purchase,
+        # A line item's own quantity/unit/cost/etc. take priority over any
+        # same-named purchase-level field when both dicts get merged below.
+    }
+    rows = []
+    for item in line_items:
+        row_data = {**joined, **item, "purchase_id": purchase["purchase_id"]}
+        rows.append([row_data.get(col, "") for col in PART_PRICES_HEADER])
+    sheet.append_rows(rows, value_input_option="USER_ENTERED")
+
+
 def sync_verified_supply_purchase(purchase: dict) -> bool:
     """Writes one verified supply purchase + its line items to the real
-    Sheets. Same reasoning as sync_verified_bill: doesn't raise on
-    failure, SQLite stays the source of truth either way."""
+    Sheets -- the Supplies/SupplyLineItems audit-trail pair, plus the
+    flat PartPrices sheet used for actually comparing prices across
+    suppliers (see PART_PRICES_HEADER). Same reasoning as
+    sync_verified_bill: doesn't raise on failure, SQLite stays the source
+    of truth either way. PART_PRICES_SHEET_ID is optional -- skipped
+    (logged, not fatal) if unset, same convention as every other optional
+    Sheet in this file, so this never blocks the review page's save."""
     try:
         upsert_supply_purchase(purchase)
         replace_supply_line_items(purchase["purchase_id"], purchase.get("line_items") or [])
+        if settings.part_prices_sheet_id:
+            replace_part_price_rows(purchase, purchase.get("line_items") or [])
+        else:
+            logger.info("PART_PRICES_SHEET_ID not set -- skipping PartPrices sync for %s", purchase.get("purchase_id"))
         logger.info("synced supply purchase %s to Google Sheets OK", purchase.get("purchase_id"))
         return True
     except Exception:

@@ -71,6 +71,7 @@ async def supply_purchase_review_submit(request: Request, purchase_id: str, toke
     line_items = [
         {
             "description": form.get(f"description_{row_id}", ""),
+            "canonical_part": form.get(f"canonical_part_{row_id}", ""),
             "category": form.get(f"category_{row_id}", ""),
             "quantity": form.get(f"quantity_{row_id}", ""),
             "unit": form.get(f"unit_{row_id}", ""),

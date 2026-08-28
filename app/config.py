@@ -50,6 +50,7 @@ class Settings:
     # -- supply/parts purchase tracking (see app/supplies.py, app/supplies_routes.py) --
     supplies_sheet_id: str
     supply_line_items_sheet_id: str
+    part_prices_sheet_id: str  # flat cross-supplier price-comparison view; optional, see app/sheets_client.py
 
 
 def _env(key: str, default: str = "") -> str:
@@ -91,6 +92,7 @@ def _load() -> Settings:
         maintenance_sheet_worksheet=_env("MAINTENANCE_SHEET_WORKSHEET"),
         supplies_sheet_id=_env("SUPPLIES_SHEET_ID"),
         supply_line_items_sheet_id=_env("SUPPLY_LINE_ITEMS_SHEET_ID"),
+        part_prices_sheet_id=_env("PART_PRICES_SHEET_ID"),
     )
 
 
