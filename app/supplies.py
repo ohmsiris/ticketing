@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from app.db import get_conn
+from app.supply_parts_seed import SEED_KNOWN_PARTS
 
 # Same reasoning and same value as bills.py's OPEN_CHAIN_TIMEOUT_MINUTES.
 OPEN_CHAIN_TIMEOUT_MINUTES = 30
@@ -79,16 +80,24 @@ def _insert_line_items(conn, purchase_id: str, items: list[dict], start: int = 1
 
 def get_known_canonical_parts() -> list[str]:
     """
-    Every distinct canonical_part already in use, most-recently-used
-    first (capped at MAX_KNOWN_PARTS_IN_PROMPT), then alphabetized for a
-    stable/readable prompt. Fed into extract_supply_purchase() as matching
-    context -- the whole point of canonical_part is grouping the SAME real
-    part across different bills for price comparison, and different shops
-    write the same part in different languages (one bill in Thai, another
-    in English) or different phrasing. Without seeing what's already in
-    use, the model has nothing to match against and just invents a fresh
-    name every time, silently fragmenting one real part into two rows
-    that never get compared. See app/supply_extraction.py's docstring.
+    Every distinct canonical_part already in use (real purchases, most-
+    recently-used first) UNIONED with SEED_KNOWN_PARTS (see
+    app/supply_parts_seed.py -- extracted from the user's own existing
+    "Saraburi Maintenence Sheet" machine-parts catalog), capped at
+    MAX_KNOWN_PARTS_IN_PROMPT, then alphabetized for a stable/readable
+    prompt. Fed into extract_supply_purchase() as matching context -- the
+    whole point of canonical_part is grouping the SAME real part across
+    different bills for price comparison, and different shops write the
+    same part in different languages (one bill in Thai, another in
+    English) or different phrasing. Without seeing what's already in use,
+    the model has nothing to match against and just invents a fresh name
+    every time, silently fragmenting one real part into two rows that
+    never get compared. See app/supply_extraction.py's docstring.
+
+    Real purchases take priority over the seed list when both exist and
+    the cap would otherwise cut something -- they reflect what's actually
+    been bought through the bot, the seed list is just a head start for
+    parts that haven't come through yet.
     """
     conn = get_conn()
     try:
@@ -100,13 +109,14 @@ def get_known_canonical_parts() -> list[str]:
             WHERE spi.canonical_part IS NOT NULL AND spi.canonical_part != ''
             GROUP BY spi.canonical_part
             ORDER BY last_used DESC
-            LIMIT ?
-            """,
-            (MAX_KNOWN_PARTS_IN_PROMPT,),
+            """
         ).fetchall()
     finally:
         conn.close()
-    return sorted(row["canonical_part"] for row in rows)
+    from_db = [row["canonical_part"] for row in rows]
+    seen = set(from_db)
+    combined = from_db + [p for p in SEED_KNOWN_PARTS if p not in seen]
+    return sorted(combined[:MAX_KNOWN_PARTS_IN_PROMPT])
 
 
 def find_open_chain(reporter: str) -> Optional[dict]:
