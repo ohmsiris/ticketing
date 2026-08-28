@@ -32,11 +32,15 @@ The scheduled jobs. All pushed to Ohm only, except #4:
    reported done.
 7. parts_catalog_refresh -- once a day at 03:15 Asia/Bangkok (right after
    #5's roster refresh, same quiet-hours reasoning), re-pulls
-   app/known_parts_seed.txt from the user's real "Saraburi Maintenence
-   Sheet" so edits there show up in supply-purchase canonical_part
-   matching without a developer manually re-syncing. See
-   app/parts_catalog_sync.py. No-op if PARTS_CATALOG_SHEET_ID isn't
-   configured.
+   app/known_parts_seed.txt from the "Known Parts" tab of the user's real
+   "Saraburi Maintenence Sheet" so edits there show up in supply-purchase
+   canonical_part matching without a developer manually re-syncing. The
+   actual flattening/cleanup of the source tabs into that one "Known
+   Parts" tab is a Google Apps Script bound to that spreadsheet (see
+   apps_script/sync_known_parts.gs), not this job -- this just mirrors
+   the already-clean result, same split as the user asked for ("most of
+   my syncs are on there"). See app/parts_catalog_sync.py. No-op if
+   PARTS_CATALOG_SHEET_ID isn't configured.
 """
 import logging
 

@@ -379,18 +379,37 @@ skip this sync; Supplies/SupplyLineItems still work fine without it.
 help, canonical_part starts from nothing and only learns real parts as
 purchases come through the bot -- the first bill for any part has
 nothing to match against. `app/known_parts_seed.txt` gives it a running
-start, refreshed daily (03:15 Asia/Bangkok, `app/parts_catalog_sync.py`)
-from the user's own pre-existing "Saraburi Maintenence Sheet" -- its
-อะไหล่ Main / อะไหล่ / Motor Index Main tabs already list every breaker,
-contactor, motor, bearing, belt, and chain spec in use across both
-branches' machines. Set `PARTS_CATALOG_SHEET_ID` (shared as Viewer with
-the service account) to turn this on; same mirrors app/roster_sync.py's
-role for the vehicle roster -- never overwrites the seed file unless the
-freshly parsed data looks sane, leaves the last-known-good file alone on
-a transient read failure or an unexpected layout change. Leave the env
-var blank to disable -- supply purchases still work, canonical_part just
-starts from an empty list and learns organically from real purchases
-instead.
+start, pulled from the user's own pre-existing "Saraburi Maintenence
+Sheet" -- its อะไหล่ Main / อะไหล่ / Motor Index Main tabs already list
+every breaker, contactor, motor, bearing, belt, and chain spec in use
+across both branches' machines.
+
+The flattening/cleanup of those three tabs into one clean parts list is
+deliberately done in a **Google Apps Script bound to that spreadsheet**
+(`apps_script/sync_known_parts.gs` in this repo, for reference/version
+control -- the live copy lives in that Sheet's own Extensions > Apps
+Script editor), not in this codebase, per the user's explicit preference
+("most of my syncs are on there its easier to visualise"). It writes its
+result into a "Known Parts" tab in the same spreadsheet once a day. To
+change what counts as junk, or how a part gets normalized, edit that
+script directly in Sheets -- no code change or redeploy needed here.
+
+One-time setup for that script: open the spreadsheet, Extensions > Apps
+Script, paste in `apps_script/sync_known_parts.gs`'s contents, run
+`installDailyTrigger` once (approves permissions, installs a ~2 AM daily
+trigger), then run `syncKnownParts` once by hand so "Known Parts" exists
+immediately.
+
+`app/parts_catalog_sync.py`'s job (03:15 Asia/Bangkok, right after the
+Apps Script's ~2 AM run) just mirrors that already-clean "Known Parts"
+tab into `app/known_parts_seed.txt` -- same safety net as
+`app/roster_sync.py`'s role for the vehicle roster: never overwrites the
+seed file unless the freshly read data looks sane, leaves the
+last-known-good file alone on a transient read failure. Set
+`PARTS_CATALOG_SHEET_ID` (shared as Viewer with the service account) to
+turn this on. Leave the env var blank to disable -- supply purchases
+still work, canonical_part just starts from an empty list and learns
+organically from real purchases instead.
 
 **Categories are a first draft.** `CATEGORIES` in `app/supply_extraction.py`
 (belts & chains, bearings & bushings, electrical, motors & pumps, seals &
