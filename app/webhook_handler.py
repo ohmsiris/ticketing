@@ -413,13 +413,15 @@ def _handle_maintenance_done(reporter: str, text: str, result: dict, reply_token
         _reply(reporter, reply_token, [strings.maintenance_task_not_found()])
         return
 
-    # "เมื่อวานล้างฟรีซหลอด 2 เสร็จ" (did it yesterday, forgot to report at
-    # the time) backdates the log entry -- otherwise get_due_tasks() would
-    # anchor the next-due date on today, one day later than it should be.
+    # "เมื่อวานล้างฟรีซหลอด 2 เสร็จ" / "...เมื่อวันที่ 15 มิถุนายน" (did it
+    # earlier, forgot to report at the time) backdates the log entry --
+    # otherwise get_due_tasks() would anchor the next-due date on today,
+    # later than it actually should be.
     days_ago = result.get("maintenance_completed_days_ago")
-    completed_at = maintenance.days_ago_to_iso(days_ago)
+    calendar_date = result.get("maintenance_completed_calendar")
+    completed_at = maintenance.resolve_completed_at(days_ago, calendar_date)
     maintenance.log_completion(task_id, reporter, text, completed_at=completed_at)
-    _reply(reporter, reply_token, [strings.maintenance_done_confirmation(task["name"], days_ago)])
+    _reply(reporter, reply_token, [strings.maintenance_done_confirmation(task["name"], days_ago, calendar_date)])
 
 
 def _handle_photo_message(reporter: str, message: dict, is_group: bool, reply_token: str) -> None:

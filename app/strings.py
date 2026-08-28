@@ -182,10 +182,14 @@ def cancel_ticket_picker_prompt() -> str:
 # --- Preventive maintenance (recurring tasks -- see app/maintenance.py) ---
 
 
-def maintenance_done_confirmation(task_name: str, days_ago: int | None = None) -> str:
-    """days_ago: from classify()'s maintenance_completed_days_ago -- shown
-    so a backdated report ("เมื่อวานล้างฟรีซหลอด 2 เสร็จ") gets clear
-    confirmation it was actually logged against that date, not today."""
+def maintenance_done_confirmation(task_name: str, days_ago: int | None = None, calendar_date: str | None = None) -> str:
+    """days_ago / calendar_date: from classify()'s maintenance_completed_*
+    fields -- shown so a backdated report ("เมื่อวานล้างฟรีซหลอด 2 เสร็จ",
+    or "...เมื่อวันที่ 15 มิถุนายน") gets clear confirmation it was
+    actually logged against that date, not today. At most one of the two
+    is ever set (see classifier.py)."""
+    if calendar_date:
+        return f"✅ บันทึกแล้ว: {task_name} ({calendar_date})"
     if not days_ago:
         return f"✅ บันทึกแล้ว: {task_name}"
     when = "เมื่อวาน" if days_ago == 1 else f"{days_ago} วันที่แล้ว"

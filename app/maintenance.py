@@ -25,8 +25,12 @@ distinction matters given the catalog gets corrected over time.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
+from app.config import TIMEZONE
 from app.db import get_conn
+
+BANGKOK = ZoneInfo(TIMEZONE)
 
 # interval_days: cadence in days (1=daily, 7=weekly, 30=monthly, 90=every
 # 3mo, 180=every 6mo). 0 is a real, deliberate value meaning "condition-
@@ -195,11 +199,12 @@ def get_task(task_id: int) -> Optional[dict]:
 def log_completion(task_id: int, reporter: str, note: str, completed_at: Optional[str] = None) -> None:
     """
     completed_at: ISO 8601 UTC timestamp to backdate the completion to
-    (e.g. someone reporting today that they actually did it yesterday --
-    see days_ago_to_iso() below). Defaults to right now if not given. This
-    is what get_due_tasks() anchors its next-due math on, so a backdated
-    report correctly shifts the next reminder earlier instead of the app
-    thinking the cadence restarted from today.
+    (e.g. someone reporting today that they actually did it yesterday, or
+    even a couple months back -- see resolve_completed_at() below).
+    Defaults to right now if not given. This is what get_due_tasks()
+    anchors its next-due math on, so a backdated report correctly shifts
+    the next reminder earlier instead of the app thinking the cadence
+    restarted from today.
     """
     conn = get_conn()
     try:
@@ -212,12 +217,42 @@ def log_completion(task_id: int, reporter: str, note: str, completed_at: Optiona
         conn.close()
 
 
-def days_ago_to_iso(days_ago: Optional[int]) -> Optional[str]:
-    """Turns classify()'s maintenance_completed_days_ago into an ISO UTC
-    timestamp for log_completion(), or None (meaning "now") if not given."""
-    if not days_ago:
+def resolve_completed_at(days_ago: Optional[int], calendar_date: Optional[str]) -> Optional[str]:
+    """
+    Turns classify()'s maintenance_completed_days_ago / _calendar fields
+    into an ISO 8601 UTC timestamp for log_completion(), or None (meaning
+    "now") if neither is given. calendar_date wins if somehow both are
+    given -- see classifier.py, which already prefers it there too, since
+    it's a plain date read rather than model arithmetic.
+
+    The exact day is anchored at noon Bangkok time (not midnight UTC) --
+    using a time near the middle of the intended day, in the timezone the
+    rest of this app reasons in, avoids the date silently shifting by one
+    depending on exactly when this runs, which matters for get_due_tasks()'s
+    day-level math.
+
+    Rejects (falls back to None -- "now") a calendar_date in the future --
+    can't complete something that hasn't happened yet -- or more than
+    roughly 3 years back, which is far more likely a misread than a real
+    backfill.
+    """
+    today = datetime.now(BANGKOK).date()
+
+    if calendar_date:
+        try:
+            target = datetime.strptime(calendar_date, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+    elif days_ago:
+        target = today - timedelta(days=days_ago)
+    else:
         return None
-    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+
+    if target > today or target < today - timedelta(days=3 * 365):
+        return None
+
+    noon = datetime.combine(target, datetime.min.time(), tzinfo=BANGKOK) + timedelta(hours=12)
+    return noon.astimezone(timezone.utc).isoformat()
 
 
 def get_due_tasks(lookahead_days: int = 0) -> list[dict]:

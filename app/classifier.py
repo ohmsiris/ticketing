@@ -64,6 +64,7 @@ this shape:
   "close_specific_no_match": <true or false>,
   "maintenance_task_id": <integer or null>,
   "maintenance_completed_days_ago": <integer or null>,
+  "maintenance_completed_calendar": "<YYYY-MM-DD or null>",
   "cancel_ticket_id": <integer or null>,
   "banter_reply": "<short Thai reply, or null>"
 }}
@@ -86,12 +87,25 @@ new_ticket: a maintenance_done message reports a routine task from the \
 catalog being done; new_ticket describes a NEW or unusual problem (broken, \
 unexpected, not part of the regular schedule) -- when genuinely unsure \
 which, prefer new_ticket (a report never silently vanishes that way). If \
-they mention WHEN they actually did it and it wasn't today/just now -- \
-"เมื่อวาน" (yesterday), "เมื่อวานซืน" (day before yesterday), "3 วันที่แล้ว" \
-(3 days ago), "อาทิตย์ที่แล้ว" (about a week ago, ~7) -- fill \
-maintenance_completed_days_ago with that many days before today. Leave it \
-null if they don't mention timing, or say something meaning today/just \
-now ("เมื่อกี้", "เมื่อสักครู่", or no time reference at all).
+they mention WHEN they actually did it and it wasn't today/just now, use \
+EXACTLY ONE of these two fields -- never compute one from the other \
+yourself, never do date arithmetic in your head:
+  - maintenance_completed_days_ago: for a VAGUE relative time with no \
+explicit date -- "เมื่อวาน" (yesterday -> 1), "เมื่อวานซืน" (day before \
+yesterday -> 2), "3 วันที่แล้ว" (3 days ago -> 3), "อาทิตย์ที่แล้ว" (about a \
+week ago -> 7), "2 เดือนที่แล้ว" (about 2 months ago -> 60). Approximate is \
+fine here, that's inherent to how vague the phrasing is.
+  - maintenance_completed_calendar: whenever an EXPLICIT calendar date is \
+given (a day+month, with or without a year, or a named day like "วันจันทร์\
+ที่แล้ว" that has a specific date) -- resolve it to YYYY-MM-DD using the \
+exact same date resolution rules given below for due dates (month name \
+forms, Buddhist-Era year conversion, no-year-passed-so-use-last-\
+occurrence-not-next). Put the result here, NOT in \
+maintenance_completed_days_ago -- do not convert it to a day-count \
+yourself, the app does that conversion in plain arithmetic afterward. \
+Getting this field right only requires reading a date, never counting.
+Leave both null if they don't mention timing, or say something meaning \
+today/just now ("เมื่อกี้", "เมื่อสักครู่", or no time reference at all).
 - "new_ticket": the message describes a new problem, issue, or task to \
 track. If it ALSO states a due date/deadline in the same message (e.g. \
 "เปลี่ยนน้ำมันเครื่อง 27/9/69"), extract that date too -- fill \
@@ -259,6 +273,7 @@ class Classification(TypedDict):
     close_specific_no_match: bool
     maintenance_task_id: Optional[int]
     maintenance_completed_days_ago: Optional[int]
+    maintenance_completed_calendar: Optional[str]
     cancel_ticket_id: Optional[int]
     banter_reply: Optional[str]
 
@@ -292,6 +307,7 @@ def _default_classification(awaiting_due_date: bool = False) -> Classification:
         "close_specific_no_match": False,
         "maintenance_task_id": None,
         "maintenance_completed_days_ago": None,
+        "maintenance_completed_calendar": None,
         "cancel_ticket_id": None,
         "banter_reply": None,
     }
@@ -420,6 +436,15 @@ def classify(
         elif maintenance_completed_days_ago <= 0 or maintenance_completed_days_ago > 365:
             maintenance_completed_days_ago = None  # 0/negative/absurdly-large isn't meaningful as "days ago"
 
+        maintenance_completed_calendar = parsed.get("maintenance_completed_calendar")
+        if not isinstance(maintenance_completed_calendar, str) or not maintenance_completed_calendar.strip():
+            maintenance_completed_calendar = None
+        elif maintenance_completed_days_ago is not None:
+            # Contract says use exactly one -- if the model gave both
+            # anyway, the calendar date is the deterministic one (no model
+            # arithmetic involved getting there), prefer it.
+            maintenance_completed_days_ago = None
+
         department = parsed.get("department")
         if department not in KNOWN_DEPARTMENTS:
             department = DEFAULT_DEPARTMENT
@@ -449,6 +474,7 @@ def classify(
             "close_specific_no_match": bool(parsed.get("close_specific_no_match")),
             "maintenance_task_id": maintenance_task_id,
             "maintenance_completed_days_ago": maintenance_completed_days_ago,
+            "maintenance_completed_calendar": maintenance_completed_calendar,
             "cancel_ticket_id": parsed.get("cancel_ticket_id"),
             "banter_reply": banter_reply,
         }
