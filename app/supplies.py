@@ -21,6 +21,15 @@ TOTAL_TOLERANCE_FRACTION = 0.10  # plus up to 10% of the final page's total
 
 PURCHASE_FIELDS = ("supplier_name", "date", "branch")
 
+# Cap on how many known canonical_part names get fed back into the next
+# extraction call as matching context (see get_known_canonical_parts and
+# app/supply_extraction.py) -- keeps the prompt bounded even after years of
+# purchases. A small business buying belts/bearings/electrical parts isn't
+# going to blow past a few hundred distinct parts; if it ever does, the
+# oldest-used names just stop being offered as reuse candidates, which only
+# makes matching slightly less complete, never wrong.
+MAX_KNOWN_PARTS_IN_PROMPT = 400
+
 
 def totals_are_close_enough(combined_sum: float, final_total: float) -> bool:
     tolerance = max(TOTAL_TOLERANCE_FLOOR, TOTAL_TOLERANCE_FRACTION * final_total)
@@ -66,6 +75,38 @@ def _insert_line_items(conn, purchase_id: str, items: list[dict], start: int = 1
                 item.get("canonical_part") or item.get("description", ""),
             ),
         )
+
+
+def get_known_canonical_parts() -> list[str]:
+    """
+    Every distinct canonical_part already in use, most-recently-used
+    first (capped at MAX_KNOWN_PARTS_IN_PROMPT), then alphabetized for a
+    stable/readable prompt. Fed into extract_supply_purchase() as matching
+    context -- the whole point of canonical_part is grouping the SAME real
+    part across different bills for price comparison, and different shops
+    write the same part in different languages (one bill in Thai, another
+    in English) or different phrasing. Without seeing what's already in
+    use, the model has nothing to match against and just invents a fresh
+    name every time, silently fragmenting one real part into two rows
+    that never get compared. See app/supply_extraction.py's docstring.
+    """
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT spi.canonical_part AS canonical_part, MAX(sp.created_at) AS last_used
+            FROM supply_purchase_items spi
+            JOIN supply_purchases sp ON sp.purchase_id = spi.purchase_id
+            WHERE spi.canonical_part IS NOT NULL AND spi.canonical_part != ''
+            GROUP BY spi.canonical_part
+            ORDER BY last_used DESC
+            LIMIT ?
+            """,
+            (MAX_KNOWN_PARTS_IN_PROMPT,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return sorted(row["canonical_part"] for row in rows)
 
 
 def find_open_chain(reporter: str) -> Optional[dict]:

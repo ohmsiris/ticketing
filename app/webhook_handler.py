@@ -733,7 +733,9 @@ def _handle_supply_purchase_message(
     vehicle-roster-match warning since this isn't tied to one vehicle.
     """
     try:
-        extracted = extract_supply_purchase(file_bytes, media_type)
+        extracted = extract_supply_purchase(
+            file_bytes, media_type, known_canonical_parts=supplies.get_known_canonical_parts()
+        )
     except Exception:
         logger.exception("supply purchase extraction failed for message_id=%s from %s", message_id, reporter)
         if not is_group:

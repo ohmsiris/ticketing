@@ -16,17 +16,29 @@ Each line item also gets a `canonical_part` field alongside the verbatim
 sells this part cheapest", not stock tracking, so every purchase of the
 "same" part needs to land under one consistent name for the PartPrices
 Sheet to actually be comparable across suppliers/bills (see
-app/sheets_client.py's PART_PRICES_HEADER). This is Claude's best-effort
-normalization at extraction time, not a real matched-against-a-catalog
-system -- there's no canonical parts table, no fuzzy re-matching, nothing
-stopping the same real part from drifting to two slightly different
-canonical_part spellings over time. The reviewer can (and should) hand-fix
-canonical_part on the review page to keep it aligned with how the same
-part was named in an earlier purchase, same as any other field there. A
-real catalog-matching system (mirroring how maintenance.py matches
-free text against DEFAULT_TASKS by meaning) is a reasonable v2 if drift
-turns out to be a real problem in practice -- not built now since it's
-unproven whether it's actually needed yet.
+app/sheets_client.py's PART_PRICES_HEADER). The user flagged a real risk
+here: different shops describe the identical part in different languages
+(one bill in Thai, another in English) or different phrasing -- without
+help, that silently fragments one real part into multiple canonical_part
+strings that never get compared against each other. Two mitigations, no
+literal web search involved:
+
+1. Brand names/model numbers are always normalized to standard
+   Roman-script spelling (e.g. "Shell", "Rimula", "SKF") regardless of
+   what script the surrounding bill uses -- see the prompt.
+2. extract_supply_purchase()'s known_canonical_parts parameter feeds back
+   every canonical_part name already in use (app/supplies.py's
+   get_known_canonical_parts) so the model matches against real prior
+   usage instead of inventing a fresh name from nothing each time -- same
+   trick as bill_extraction.py's vehicle roster and maintenance.py's
+   DEFAULT_TASKS matching.
+
+Still Claude's best-effort at extraction time, not a real database-
+enforced catalog -- there's no hard uniqueness constraint, nothing stops
+drift entirely. The reviewer can (and should) hand-fix canonical_part on
+the review page when it doesn't match how the same part was named before;
+that correction itself becomes part of next time's known-parts list, so
+the system gets more consistent over time rather than less.
 """
 import base64
 import json
@@ -140,16 +152,26 @@ EXTRACTION_SCHEMA = {
                         "description": (
                             "A short, normalized name for this exact part, used later to compare "
                             "prices for the SAME part across different bills/suppliers -- so "
-                            "consistency matters more than style. Strip shop-specific phrasing, "
-                            "brand fluff, and unit/quantity words, but KEEP any part number, size, "
-                            "or spec that actually distinguishes it from a similar part (e.g. "
-                            "'สายพานพัดลม A47 ยี่ห้อ Bando 1 เส้น' -> 'สายพาน A47'; "
+                            "consistency matters more than style, and more than matching this bill's "
+                            "own wording. Strip shop-specific phrasing and unit/quantity words, but "
+                            "KEEP any part number, size, or spec that actually distinguishes it from a "
+                            "similar part (e.g. 'สายพานพัดลม A47 ยี่ห้อ Bando 1 เส้น' -> 'สายพาน A47'; "
                             "'ลูกปืนล้อหลัง เบอร์ 6205' -> 'ลูกปืน 6205'; "
                             "'น้ำมันเครื่อง Shell Rimula 15W-40 ถัง 18 ลิตร' -> 'น้ำมันเครื่อง Rimula 15W-40'). "
-                            "Keep it in Thai (or the language the part number/spec is naturally written "
-                            "in), not translated. For a labor/service charge with no specific part, "
-                            "use the same value as description. Empty string only if description itself "
-                            "is empty."
+                            "IMPORTANT: two shops selling the exact same part often write it in "
+                            "different languages (one bill in Thai, another in English) -- always write "
+                            "any brand name or model/part number in its standard Roman-script form "
+                            "(e.g. 'Shell', 'Rimula', 'Bando', 'SKF'), never a Thai transliteration of "
+                            "it, even when the rest of the bill (and the description field) is in Thai. "
+                            "Generic Thai part-type words (สายพาน, ลูกปืน, น้ำมันเครื่อง, etc.) stay in "
+                            "Thai -- only the brand/model portion needs to be language-normalized. If a "
+                            "list of already-used canonical_part names is provided below, check it "
+                            "FIRST: if a line item is the same real part as one already in that list "
+                            "(regardless of what language or phrasing THIS bill uses for it), reuse "
+                            "that EXACT existing string instead of writing a new one. Only write a new "
+                            "canonical_part when this genuinely isn't one of the known ones. For a "
+                            "labor/service charge with no specific part, use the same value as "
+                            "description. Empty string only if description itself is empty."
                         ),
                     },
                     "cost": {
@@ -204,9 +226,15 @@ the wording.
 Alongside each verbatim description, also produce canonical_part: a short \
 normalized name for that exact part, used later to compare prices for the \
 SAME part across different bills and suppliers. This is the one field \
-where consistency matters more than matching the bill's exact wording -- \
-strip shop-specific phrasing and brand fluff, but always keep any part \
-number, size, or spec that actually distinguishes it from a similar part.
+where consistency matters more than matching the bill's exact wording, and \
+more than matching this bill's language -- different shops often write the \
+identical part in different languages or phrasing, so always normalize any \
+brand name or model/part number to its standard Roman-script spelling \
+(e.g. "Shell", "Rimula", "Bando", "SKF") even on an otherwise all-Thai \
+bill, and check the list of already-known canonical_part names (given to \
+you in the user message, if any) FIRST -- reuse an existing one exactly \
+whenever a line item is the same real part, only inventing a new string \
+when it genuinely isn't already in that list.
 
 Some bills span more than one photo (the line items continue onto a second \
 page). Watch specifically for a handwritten or printed "ยอดยกไป" note, \
@@ -225,10 +253,36 @@ def _content_block(file_bytes: bytes, media_type: str) -> dict:
     return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}}
 
 
-def extract_supply_purchase(file_bytes: bytes, media_type: str) -> dict:
-    """Sends one supplier-bill photo or PDF (as raw bytes) to Claude and
+def _extraction_prompt_text(known_canonical_parts: Optional[list[str]]) -> str:
+    if not known_canonical_parts:
+        return "Read this supplier bill and extract the data."
+    parts_list = "\n".join(f"- {p}" for p in known_canonical_parts)
+    return (
+        "Read this supplier bill and extract the data.\n\n"
+        "Canonical parts already in use from past purchases -- for canonical_part, "
+        "reuse one of these EXACTLY whenever a line item is the same real part "
+        "(regardless of what language/phrasing THIS bill uses), even if that means "
+        "writing a different language than the rest of this bill uses. Only write a "
+        "new canonical_part for a line item that genuinely isn't one of these:\n"
+        f"{parts_list}"
+    )
+
+
+def extract_supply_purchase(
+    file_bytes: bytes, media_type: str, known_canonical_parts: Optional[list[str]] = None
+) -> dict:
+    """
+    Sends one supplier-bill photo or PDF (as raw bytes) to Claude and
     returns the extracted data as a dict. media_type must be one of
-    'image/jpeg', 'image/png', or 'application/pdf'."""
+    'image/jpeg', 'image/png', or 'application/pdf'.
+
+    known_canonical_parts (see app/supplies.py's get_known_canonical_parts)
+    is fed back in as matching context for the canonical_part field -- see
+    this module's docstring for why that's needed to make cross-language/
+    cross-shop price comparison actually work. Optional; omitting it just
+    means every line item's canonical_part is a fresh guess with nothing
+    to match against, same as before this parameter existed.
+    """
     response = _client_lazy().messages.create(
         model=MODEL,
         max_tokens=8000,
@@ -238,7 +292,7 @@ def extract_supply_purchase(file_bytes: bytes, media_type: str) -> dict:
                 "role": "user",
                 "content": [
                     _content_block(file_bytes, media_type),
-                    {"type": "text", "text": "Read this supplier bill and extract the data."},
+                    {"type": "text", "text": _extraction_prompt_text(known_canonical_parts)},
                 ],
             }
         ],
