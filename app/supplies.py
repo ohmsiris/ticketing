@@ -7,10 +7,25 @@ parts/supplies bought from a supplier, not a vehicle repair bill.
 import random
 import string
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 from app.db import get_conn
-from app.supply_parts_seed import SEED_KNOWN_PARTS
+
+# Plain data file, not a Python module -- app/parts_catalog_sync.py's
+# scheduled job overwrites this daily from the user's real parts-catalog
+# Google Sheet (see that module's docstring), same convention as
+# app/vehicle_roster.csv for app/roster_sync.py. One canonical_part-shaped
+# string per line. Missing/empty file just means an empty seed -- not an
+# error, since PARTS_CATALOG_SHEET_ID (and therefore this file) is optional.
+KNOWN_PARTS_SEED_PATH = Path(__file__).resolve().parent / "known_parts_seed.txt"
+
+
+def _load_seed_known_parts() -> list[str]:
+    if not KNOWN_PARTS_SEED_PATH.exists():
+        return []
+    with open(KNOWN_PARTS_SEED_PATH, encoding="utf-8") as f:
+        return [line.rstrip("\n") for line in f if line.strip()]
 
 # Same reasoning and same value as bills.py's OPEN_CHAIN_TIMEOUT_MINUTES.
 OPEN_CHAIN_TIMEOUT_MINUTES = 30
@@ -81,9 +96,11 @@ def _insert_line_items(conn, purchase_id: str, items: list[dict], start: int = 1
 def get_known_canonical_parts() -> list[str]:
     """
     Every distinct canonical_part already in use (real purchases, most-
-    recently-used first) UNIONED with SEED_KNOWN_PARTS (see
-    app/supply_parts_seed.py -- extracted from the user's own existing
-    "Saraburi Maintenence Sheet" machine-parts catalog), capped at
+    recently-used first) UNIONED with the seed list in
+    app/known_parts_seed.txt -- extracted from the user's own existing
+    "Saraburi Maintenence Sheet" machine-parts catalog, and kept current
+    by app/parts_catalog_sync.py's daily auto-refresh job (mirrors
+    app/roster_sync.py's role for the vehicle roster) -- capped at
     MAX_KNOWN_PARTS_IN_PROMPT, then alphabetized for a stable/readable
     prompt. Fed into extract_supply_purchase() as matching context -- the
     whole point of canonical_part is grouping the SAME real part across
@@ -115,7 +132,7 @@ def get_known_canonical_parts() -> list[str]:
         conn.close()
     from_db = [row["canonical_part"] for row in rows]
     seen = set(from_db)
-    combined = from_db + [p for p in SEED_KNOWN_PARTS if p not in seen]
+    combined = from_db + [p for p in _load_seed_known_parts() if p not in seen]
     return sorted(combined[:MAX_KNOWN_PARTS_IN_PROMPT])
 
 

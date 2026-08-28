@@ -375,6 +375,23 @@ per line item with the purchase's supplier/branch/date already joined in
 part is right there next to who charged it and when. Leave it blank to
 skip this sync; Supplies/SupplyLineItems still work fine without it.
 
+**Seeding canonical_part matching from parts you already track.** Without
+help, canonical_part starts from nothing and only learns real parts as
+purchases come through the bot -- the first bill for any part has
+nothing to match against. `app/known_parts_seed.txt` gives it a running
+start, refreshed daily (03:15 Asia/Bangkok, `app/parts_catalog_sync.py`)
+from the user's own pre-existing "Saraburi Maintenence Sheet" -- its
+อะไหล่ Main / อะไหล่ / Motor Index Main tabs already list every breaker,
+contactor, motor, bearing, belt, and chain spec in use across both
+branches' machines. Set `PARTS_CATALOG_SHEET_ID` (shared as Viewer with
+the service account) to turn this on; same mirrors app/roster_sync.py's
+role for the vehicle roster -- never overwrites the seed file unless the
+freshly parsed data looks sane, leaves the last-known-good file alone on
+a transient read failure or an unexpected layout change. Leave the env
+var blank to disable -- supply purchases still work, canonical_part just
+starts from an empty list and learns organically from real purchases
+instead.
+
 **Categories are a first draft.** `CATEGORIES` in `app/supply_extraction.py`
 (belts & chains, bearings & bushings, electrical, motors & pumps, seals &
 gaskets, piping, oils/lubricants, refrigerant, filters, fasteners, tools,

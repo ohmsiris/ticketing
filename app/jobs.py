@@ -30,13 +30,20 @@ The scheduled jobs. All pushed to Ohm only, except #4:
    app/maintenance.py). Like #1/#4, no "already reminded" guard -- keeps
    re-listing anything still outstanding each day, on purpose, until it's
    reported done.
+7. parts_catalog_refresh -- once a day at 03:15 Asia/Bangkok (right after
+   #5's roster refresh, same quiet-hours reasoning), re-pulls
+   app/known_parts_seed.txt from the user's real "Saraburi Maintenence
+   Sheet" so edits there show up in supply-purchase canonical_part
+   matching without a developer manually re-syncing. See
+   app/parts_catalog_sync.py. No-op if PARTS_CATALOG_SHEET_ID isn't
+   configured.
 """
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app import maintenance, roster_sync, strings, tickets
+from app import maintenance, parts_catalog_sync, roster_sync, strings, tickets
 from app.config import TIMEZONE, settings
 from app.line_client import push_message
 
@@ -92,6 +99,10 @@ def maintenance_due_digest() -> None:
     logger.info("sent maintenance-due digest for %d task(s)", len(due))
 
 
+def parts_catalog_refresh() -> None:
+    parts_catalog_sync.refresh_parts_seed()
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone=TIMEZONE)
     scheduler.add_job(
@@ -123,6 +134,11 @@ def start_scheduler() -> BackgroundScheduler:
         maintenance_due_digest,
         CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
         id="maintenance_due_digest",
+    )
+    scheduler.add_job(
+        parts_catalog_refresh,
+        CronTrigger(hour=3, minute=15, timezone=TIMEZONE),
+        id="parts_catalog_refresh",
     )
     scheduler.start()
     logger.info("scheduler started (timezone=%s)", TIMEZONE)

@@ -51,6 +51,8 @@ class Settings:
     supplies_sheet_id: str
     supply_line_items_sheet_id: str
     part_prices_sheet_id: str  # flat cross-supplier price-comparison view; optional, see app/sheets_client.py
+    # -- parts-catalog seed auto-refresh (see app/parts_catalog_sync.py) --
+    parts_catalog_sheet_id: str  # the user's own "Saraburi Maintenence Sheet" id -- feeds app/known_parts_seed.txt
 
 
 def _env(key: str, default: str = "") -> str:
@@ -93,6 +95,7 @@ def _load() -> Settings:
         supplies_sheet_id=_env("SUPPLIES_SHEET_ID"),
         supply_line_items_sheet_id=_env("SUPPLY_LINE_ITEMS_SHEET_ID"),
         part_prices_sheet_id=_env("PART_PRICES_SHEET_ID"),
+        parts_catalog_sheet_id=_env("PARTS_CATALOG_SHEET_ID"),
     )
 
 
