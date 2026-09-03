@@ -29,6 +29,19 @@ def _line_user_id_for(reporter: str) -> str:
     return settings.ohm_line_user_id if reporter == "ohm" else settings.mom_line_user_id
 
 
+def _admin_links_message() -> str:
+    """Builds all four management-page links for the "ลิงก์"/"link"
+    on-demand command below -- tickets uses DASHBOARD_TOKEN, the other
+    three share REVIEW_TOKEN (see each router's own _token_ok)."""
+    base = settings.public_base_url
+    return strings.admin_links_message(
+        tickets_url=f"{base}/tickets?token={settings.dashboard_token}",
+        bills_url=f"{base}/bills?token={settings.review_token}",
+        slips_url=f"{base}/slips?token={settings.review_token}",
+        supplies_url=f"{base}/supplies?token={settings.review_token}",
+    )
+
+
 def _bangkok_date_str(iso_utc: str) -> str:
     return datetime.fromisoformat(iso_utc).astimezone(BANGKOK).date().isoformat()
 
@@ -114,6 +127,8 @@ def handle_message_event(event: dict) -> None:
     # "open tickets": how long each has been sitting open. "งานทั้งหมด":
     # everything open right now sorted by due date -- different angle on
     # the same underlying open tickets, not a duplicate of the other.
+    # "ลิงก์"/"link": every management-page URL in one message, so Ohm
+    # never has to go dig a token out of Railway/notes.
     stripped = text.strip()
     if reporter == "ohm" and stripped.lower() == "open tickets":
         open_tickets = tickets.get_open_tickets(min_age_hours=0)
@@ -121,6 +136,9 @@ def handle_message_event(event: dict) -> None:
         return
     if reporter == "ohm" and stripped == "งานทั้งหมด":
         reply_message(reply_token, [strings.all_open_tickets_digest(tickets.get_all_open_tickets_by_due_date())])
+        return
+    if reporter == "ohm" and stripped.lower() in ("ลิงก์", "link"):
+        reply_message(reply_token, [_admin_links_message()])
         return
 
     # A tap on the photo-type disambiguation picker (see

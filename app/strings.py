@@ -343,6 +343,22 @@ def all_open_tickets_digest(tickets: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def admin_links_message(tickets_url: str, bills_url: str, slips_url: str, supplies_url: str) -> str:
+    """The "ลิงก์" on-demand command (Ohm only, see webhook_handler.py) --
+    a quick way to get every management-page link without digging through
+    Railway/notes. URLs are built by the caller (needs settings.
+    public_base_url + the right token per page) and just handed in here,
+    same as review_url elsewhere in this file -- keeps this module free
+    of any app.config dependency."""
+    return (
+        "🔗 ลิงก์หน้าจัดการ:\n"
+        f"ทิกเก็ต: {tickets_url}\n"
+        f"บิลซ่อมรถ: {bills_url}\n"
+        f"สลิปโอนเงิน: {slips_url}\n"
+        f"บิลซื้ออะไหล่: {supplies_url}"
+    )
+
+
 def due_today_digest(tickets: list[dict]) -> str:
     """tickets: list of dicts with id, reporter, department, message, summary."""
     lines = [f"📅 งานที่ครบกำหนดวันนี้ {len(tickets)} รายการ:"]
