@@ -4,6 +4,7 @@ means, instead of trying to pattern-match Thai phrasing ourselves.
 """
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Optional, TypedDict
 from zoneinfo import ZoneInfo
@@ -329,6 +330,120 @@ def _extract_json(text: str) -> dict:
     return obj
 
 
+MAX_CLASSIFY_ATTEMPTS = 3  # see classify()'s retry loop -- a transient hiccup
+# shouldn't have to fall all the way back to a phantom ticket on the first miss
+RETRY_DELAY_SECONDS = 0.5
+
+
+def _classify_once(system: str, messages: list, awaiting_due_date: bool) -> tuple[dict, Optional[str]]:
+    """
+    One attempt at the actual API call + parse + validate -- raises on any
+    failure (network error, bad JSON, an unparseable response) so classify()
+    can retry. Returns (result_dict, raw_text_for_logging). Pulled out of
+    classify() itself purely so that function can wrap this in a retry loop
+    without the whole body living inside one.
+    """
+    response = _client_lazy().messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        # claude-sonnet-5 defaults to spending part of its budget on an
+        # internal "thinking" block before the actual JSON answer, and
+        # that spend is wildly variable -- measured anywhere from ~290
+        # to over 1000 tokens on the SAME ordinary message across
+        # repeated calls. Bumping max_tokens alone (300 -> 1024) still
+        # left a ~37% truncation rate (stop_reason: "max_tokens", cut
+        # off mid-JSON, _extract_json fails, caught below and silently
+        # defaulted -- indistinguishable from a genuine API failure on
+        # messages that had nothing wrong with them). Explicitly
+        # disabling thinking removes the variability at its source:
+        # confirmed reliable across repeated trials, and there's no
+        # accuracy cost for a task this structured -- classification
+        # doesn't need chain-of-thought, just correct extraction. 1024
+        # is now pure headroom for the answer itself (summary/
+        # banter_reply can both run a bit long), never for thinking.
+        thinking={"type": "disabled"},
+        system=system,
+        messages=messages,
+    )
+    # Find the text block by type rather than assuming content[0] is it
+    # -- thinking is disabled above so this should always be content[0]
+    # now, but that exact assumption once silently broke every single
+    # classification when a thinking block WAS present (always caught
+    # by the except below and defaulted, until caught via live
+    # testing), so keep the defensive lookup rather than re-earn that.
+    text_block = next((b for b in response.content if b.type == "text"), None)
+    if text_block is None:
+        raise ValueError("no text block in model response")
+    raw_text = text_block.text
+    parsed = _extract_json(raw_text)
+
+    intent = parsed.get("intent")
+    if intent not in KNOWN_INTENTS:
+        # unrecognized/hallucinated intent value -- same reasoning as
+        # _default_classification()'s fallback: don't manufacture a
+        # phantom ticket out of what's likely a pending due-date answer
+        intent = "due_date_reply" if awaiting_due_date else "new_ticket"
+
+    maintenance_task_id = parsed.get("maintenance_task_id")
+    if not isinstance(maintenance_task_id, int) or isinstance(maintenance_task_id, bool):
+        maintenance_task_id = None
+    if intent == "maintenance_done" and maintenance_task_id is None:
+        # Contract violation -- the prompt says never return this intent
+        # without a matched id. Don't silently mark some task done out
+        # of a guess; fall back exactly like an unrecognized intent.
+        intent = "due_date_reply" if awaiting_due_date else "new_ticket"
+
+    maintenance_completed_days_ago = parsed.get("maintenance_completed_days_ago")
+    if not isinstance(maintenance_completed_days_ago, int) or isinstance(maintenance_completed_days_ago, bool):
+        maintenance_completed_days_ago = None
+    elif maintenance_completed_days_ago <= 0 or maintenance_completed_days_ago > 365:
+        maintenance_completed_days_ago = None  # 0/negative/absurdly-large isn't meaningful as "days ago"
+
+    maintenance_completed_calendar = parsed.get("maintenance_completed_calendar")
+    if not isinstance(maintenance_completed_calendar, str) or not maintenance_completed_calendar.strip():
+        maintenance_completed_calendar = None
+    elif maintenance_completed_days_ago is not None:
+        # Contract says use exactly one -- if the model gave both
+        # anyway, the calendar date is the deterministic one (no model
+        # arithmetic involved getting there), prefer it.
+        maintenance_completed_days_ago = None
+
+    department = parsed.get("department")
+    if department not in KNOWN_DEPARTMENTS:
+        department = DEFAULT_DEPARTMENT
+
+    summary = parsed.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        summary = None  # caller falls back to the raw message -- see webhook_handler.py
+
+    remind_days_before = parsed.get("remind_days_before")
+    if not isinstance(remind_days_before, int) or isinstance(remind_days_before, bool) or remind_days_before <= 0:
+        remind_days_before = None  # 0/negative/non-numeric doesn't mean anything as "days before"
+
+    banter_reply = parsed.get("banter_reply")
+    if intent != "other" or not isinstance(banter_reply, str) or not banter_reply.strip():
+        # only meaningful for "other" -- webhook_handler.py falls back to
+        # a plain static reply if this is missing/empty
+        banter_reply = None
+
+    result = {
+        "intent": intent,
+        "department": department,
+        "summary": summary,
+        "due_date_days": parsed.get("due_date_days"),
+        "due_date_calendar": parsed.get("due_date_calendar"),
+        "remind_days_before": remind_days_before,
+        "close_ticket_id": parsed.get("close_ticket_id"),
+        "close_specific_no_match": bool(parsed.get("close_specific_no_match")),
+        "maintenance_task_id": maintenance_task_id,
+        "maintenance_completed_days_ago": maintenance_completed_days_ago,
+        "maintenance_completed_calendar": maintenance_completed_calendar,
+        "cancel_ticket_id": parsed.get("cancel_ticket_id"),
+        "banter_reply": banter_reply,
+    }
+    return result, raw_text
+
+
 def classify(
     message: str,
     awaiting_due_date: bool = False,
@@ -337,13 +452,29 @@ def classify(
     maintenance_tasks: Optional[list] = None,
 ) -> Classification:
     """
-    Classifies a single incoming text message. Never raises -- on any error,
-    or if the model returns an intent we don't recognize, this falls back to
-    "new_ticket" (better to log something as a ticket than silently drop
-    it) -- except when awaiting_due_date is true, where it falls back to
-    "due_date_reply" instead, so a failure while someone's mid-reply to
-    "when's this due?" asks them to repeat it rather than fabricating a
-    phantom ticket out of what was never a candidate to be a fresh report.
+    Classifies a single incoming text message. Retries up to
+    MAX_CLASSIFY_ATTEMPTS times on failure before giving up -- reported
+    live: "18 เสร็จแล้ว" (closing ticket #18 by number) came back as a
+    phantom new ticket instead. Reproduced against the live API: this
+    EXACT message classified correctly as close_ticket in 12/12 direct
+    trials, so it wasn't a prompt/accuracy gap -- it was a transient
+    hiccup (network blip, a malformed response, anything _classify_once
+    raises on) landing on the single-shot fallback below, the same
+    documented failure mode _default_classification() already calls out
+    for a different message once before. A single try was cheap insurance
+    against an infinite retry loop, but was too trigger-happy for how
+    routinely transient API hiccups actually are -- a couple of retries
+    costs a user-imperceptible amount of extra latency and turns most of
+    those hiccups into a normal, correct classification instead of a
+    silently-wrong phantom ticket.
+
+    Once every attempt is exhausted, this still never raises -- it falls
+    back to "new_ticket" (better to log something as a ticket than
+    silently drop it) -- except when awaiting_due_date is true, where it
+    falls back to "due_date_reply" instead, so a failure while someone's
+    mid-reply to "when's this due?" asks them to repeat it rather than
+    fabricating a phantom ticket out of what was never a candidate to be
+    a fresh report.
 
     awaiting_due_date: still used ONLY for that fallback default above (a
     cheap, deterministic DB check -- see get_open_tickets_for_reporter in
@@ -379,110 +510,25 @@ def classify(
 
     result = _default_classification(awaiting_due_date)
     raw_text = None
-    try:
-        response = _client_lazy().messages.create(
-            model=MODEL,
-            max_tokens=1024,
-            # claude-sonnet-5 defaults to spending part of its budget on an
-            # internal "thinking" block before the actual JSON answer, and
-            # that spend is wildly variable -- measured anywhere from ~290
-            # to over 1000 tokens on the SAME ordinary message across
-            # repeated calls. Bumping max_tokens alone (300 -> 1024) still
-            # left a ~37% truncation rate (stop_reason: "max_tokens", cut
-            # off mid-JSON, _extract_json fails, caught below and silently
-            # defaulted -- indistinguishable from a genuine API failure on
-            # messages that had nothing wrong with them). Explicitly
-            # disabling thinking removes the variability at its source:
-            # confirmed reliable across repeated trials, and there's no
-            # accuracy cost for a task this structured -- classification
-            # doesn't need chain-of-thought, just correct extraction. 1024
-            # is now pure headroom for the answer itself (summary/
-            # banter_reply can both run a bit long), never for thinking.
-            thinking={"type": "disabled"},
-            system=system,
-            messages=messages,
-        )
-        # Find the text block by type rather than assuming content[0] is it
-        # -- thinking is disabled above so this should always be content[0]
-        # now, but that exact assumption once silently broke every single
-        # classification when a thinking block WAS present (always caught
-        # by the except below and defaulted, until caught via live
-        # testing), so keep the defensive lookup rather than re-earn that.
-        text_block = next((b for b in response.content if b.type == "text"), None)
-        if text_block is None:
-            raise ValueError("no text block in model response")
-        raw_text = text_block.text
-        parsed = _extract_json(raw_text)
-
-        intent = parsed.get("intent")
-        if intent not in KNOWN_INTENTS:
-            # unrecognized/hallucinated intent value -- same reasoning as
-            # _default_classification()'s fallback: don't manufacture a
-            # phantom ticket out of what's likely a pending due-date answer
-            intent = "due_date_reply" if awaiting_due_date else "new_ticket"
-
-        maintenance_task_id = parsed.get("maintenance_task_id")
-        if not isinstance(maintenance_task_id, int) or isinstance(maintenance_task_id, bool):
-            maintenance_task_id = None
-        if intent == "maintenance_done" and maintenance_task_id is None:
-            # Contract violation -- the prompt says never return this intent
-            # without a matched id. Don't silently mark some task done out
-            # of a guess; fall back exactly like an unrecognized intent.
-            intent = "due_date_reply" if awaiting_due_date else "new_ticket"
-
-        maintenance_completed_days_ago = parsed.get("maintenance_completed_days_ago")
-        if not isinstance(maintenance_completed_days_ago, int) or isinstance(maintenance_completed_days_ago, bool):
-            maintenance_completed_days_ago = None
-        elif maintenance_completed_days_ago <= 0 or maintenance_completed_days_ago > 365:
-            maintenance_completed_days_ago = None  # 0/negative/absurdly-large isn't meaningful as "days ago"
-
-        maintenance_completed_calendar = parsed.get("maintenance_completed_calendar")
-        if not isinstance(maintenance_completed_calendar, str) or not maintenance_completed_calendar.strip():
-            maintenance_completed_calendar = None
-        elif maintenance_completed_days_ago is not None:
-            # Contract says use exactly one -- if the model gave both
-            # anyway, the calendar date is the deterministic one (no model
-            # arithmetic involved getting there), prefer it.
-            maintenance_completed_days_ago = None
-
-        department = parsed.get("department")
-        if department not in KNOWN_DEPARTMENTS:
-            department = DEFAULT_DEPARTMENT
-
-        summary = parsed.get("summary")
-        if not isinstance(summary, str) or not summary.strip():
-            summary = None  # caller falls back to the raw message -- see webhook_handler.py
-
-        remind_days_before = parsed.get("remind_days_before")
-        if not isinstance(remind_days_before, int) or isinstance(remind_days_before, bool) or remind_days_before <= 0:
-            remind_days_before = None  # 0/negative/non-numeric doesn't mean anything as "days before"
-
-        banter_reply = parsed.get("banter_reply")
-        if intent != "other" or not isinstance(banter_reply, str) or not banter_reply.strip():
-            # only meaningful for "other" -- webhook_handler.py falls back to
-            # a plain static reply if this is missing/empty
-            banter_reply = None
-
-        result = {
-            "intent": intent,
-            "department": department,
-            "summary": summary,
-            "due_date_days": parsed.get("due_date_days"),
-            "due_date_calendar": parsed.get("due_date_calendar"),
-            "remind_days_before": remind_days_before,
-            "close_ticket_id": parsed.get("close_ticket_id"),
-            "close_specific_no_match": bool(parsed.get("close_specific_no_match")),
-            "maintenance_task_id": maintenance_task_id,
-            "maintenance_completed_days_ago": maintenance_completed_days_ago,
-            "maintenance_completed_calendar": maintenance_completed_calendar,
-            "cancel_ticket_id": parsed.get("cancel_ticket_id"),
-            "banter_reply": banter_reply,
-        }
-    except Exception:
-        logger.exception(
-            "classification failed, defaulting to %s",
-            "due_date_reply (awaiting_due_date)" if awaiting_due_date else "new_ticket",
-        )
+    for attempt in range(1, MAX_CLASSIFY_ATTEMPTS + 1):
+        try:
+            result, raw_text = _classify_once(system, messages, awaiting_due_date)
+            break
+        except Exception:
+            if attempt < MAX_CLASSIFY_ATTEMPTS:
+                logger.warning(
+                    "classification attempt %d/%d failed, retrying: %r",
+                    attempt, MAX_CLASSIFY_ATTEMPTS, message,
+                    exc_info=True,
+                )
+                time.sleep(RETRY_DELAY_SECONDS)
+            else:
+                logger.exception(
+                    "classification failed after %d attempt(s), defaulting to %s: %r",
+                    MAX_CLASSIFY_ATTEMPTS,
+                    "due_date_reply (awaiting_due_date)" if awaiting_due_date else "new_ticket",
+                    message,
+                )
 
     # NOTE: "other" used to be force-converted to "new_ticket" here, on the
     # theory that a low-confidence read should still make a ticket rather
