@@ -171,6 +171,28 @@ def ticket_cancelled_notify_hq(ticket_id: int, reporter: str, message: str) -> s
     return f"🚫 ยกเลิกงานจาก {_reporter_label(reporter)} (#{ticket_id})\n{_snippet(message, 120)}"
 
 
+# --- Ticket management webpage (app/tickets_routes.py) -- pushed to the
+# ORIGINAL REPORTER (not HQ) whenever the manager edits/closes/cancels/
+# reopens their ticket from /tickets, skipped entirely when the manager
+# IS the reporter (no point notifying yourself of your own web edit). ---
+
+
+def ticket_closed_by_admin(ticket_id: int, message: str) -> str:
+    return f"☑️ งาน #{ticket_id} ถูกปิดแล้วครับ (ปิดผ่านหน้าเว็บจัดการทิกเก็ต)\n{_snippet(message)}"
+
+
+def ticket_cancelled_by_admin(ticket_id: int, message: str) -> str:
+    return f"🚫 งาน #{ticket_id} ถูกยกเลิกแล้วครับ (ยกเลิกผ่านหน้าเว็บจัดการทิกเก็ต)\n{_snippet(message)}"
+
+
+def ticket_reopened_by_admin(ticket_id: int, message: str) -> str:
+    return f"🔓 งาน #{ticket_id} ถูกเปิดใหม่อีกครั้งครับ (ผ่านหน้าเว็บจัดการทิกเก็ต)\n{_snippet(message)}"
+
+
+def ticket_updated_by_admin(ticket_id: int, message: str) -> str:
+    return f"🔄 งาน #{ticket_id} มีการแก้ไขข้อมูลครับ (ผ่านหน้าเว็บจัดการทิกเก็ต)\n{_snippet(message)}"
+
+
 def no_open_ticket_to_cancel() -> str:
     return "ไม่มีงานที่เปิดอยู่ให้ยกเลิกครับ"
 

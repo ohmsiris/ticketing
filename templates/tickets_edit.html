@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>แก้ไข #{{ ticket.id }}</title>
+    <link rel="stylesheet" href="/static/bills.css">
+</head>
+<body>
+    <div class="page">
+        <a class="back-link" href="/tickets?token={{ token }}">&larr; กลับไปหน้ารายการทิกเก็ต</a>
+        <h1>#{{ ticket.id }}
+            {% if ticket.status == "closed" and ticket.cancelled_at %}
+            <span class="badge badge-cancelled">ยกเลิก</span>
+            {% elif ticket.status == "closed" %}
+            <span class="badge badge-closed">ปิดแล้ว</span>
+            {% else %}
+            <span class="badge badge-open">เปิดอยู่</span>
+            {% endif %}
+        </h1>
+        <p class="subtitle">ผู้แจ้ง: {{ ticket.reporter }} -- แจ้งเมื่อ {{ ticket.created_at[:16] | replace("T", " ") }}</p>
+
+        <form method="POST" action="/tickets/{{ ticket.id }}?token={{ token }}">
+            <h2>ข้อความเดิม</h2>
+            <p class="original-message">{{ ticket.message }}</p>
+
+            <h2>แก้ไข</h2>
+            <div class="field-grid">
+                <label>เรื่อง (สรุป)
+                    <input type="text" name="summary" value="{{ ticket.summary or ticket.message }}">
+                </label>
+                <label>แผนก
+                    <select name="department">
+                        {% for dept in departments %}
+                        <option value="{{ dept }}" {% if dept == ticket.department %}selected{% endif %}>{{ dept }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>กำหนดวัน (YYYY-MM-DD, เว้นว่างได้)
+                    <input type="text" name="due_date" value="{{ ticket.due_date or '' }}" placeholder="เช่น 2026-09-10">
+                </label>
+                <label>เตือนล่วงหน้ากี่วัน (เว้นว่างได้)
+                    <input type="text" name="remind_days_before" value="{{ ticket.remind_days_before or '' }}" placeholder="เช่น 3">
+                </label>
+                <label>สถานะ
+                    <select name="status">
+                        <option value="open" {% if ticket.status == "open" %}selected{% endif %}>เปิดอยู่</option>
+                        <option value="closed" {% if ticket.status == "closed" %}selected{% endif %}>ปิดแล้ว (งานเสร็จ)</option>
+                    </select>
+                </label>
+            </div>
+            <p class="total-hint">
+                เลือก "ปิดแล้ว" หมายถึงงานนี้ทำเสร็จแล้ว -- ถ้าอยากยกเลิกทิกเก็ตนี้ทั้งอัน (พิมพ์ผิด/ไม่เกี่ยวข้องแล้ว)
+                ใช้ปุ่ม "ยกเลิกทิกเก็ตนี้" ด้านล่างแทน ไม่ใช่ตั้งสถานะตรงนี้
+            </p>
+
+            <div class="submit-row">
+                <button type="submit">บันทึก</button>
+            </div>
+        </form>
+
+        {% if ticket.status == "open" %}
+        <div class="cancel-row">
+            <form method="POST" action="/tickets/{{ ticket.id }}/cancel?token={{ token }}"
+                  onsubmit="return confirm('ยกเลิกทิกเก็ต #{{ ticket.id }} เลยไหม? (ถือว่าไม่ต้องทำ ไม่ใช่ว่าทำเสร็จแล้ว)');">
+                <button type="submit" class="danger-button">ยกเลิกทิกเก็ตนี้</button>
+            </form>
+        </div>
+        {% elif ticket.cancelled_at %}
+        <p class="verified-note">ยกเลิกเมื่อ {{ ticket.cancelled_at[:16] | replace("T", " ") }}</p>
+        {% endif %}
+    </div>
+</body>
+</html>

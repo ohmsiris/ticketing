@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>Tickets</title>
+    <link rel="stylesheet" href="/static/bills.css">
+</head>
+<body>
+    <div class="page">
+        <h1>Tickets</h1>
+        <p class="subtitle">
+            เปิดอยู่ {{ tickets | selectattr("status", "equalto", "open") | list | length }}
+            / ทั้งหมด {{ tickets | length }} -- คลิกที่รายการเพื่อแก้ไข ปิดงาน หรือยกเลิก
+        </p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>ผู้แจ้ง</th>
+                    <th>แผนก</th>
+                    <th>เรื่อง</th>
+                    <th>สถานะ</th>
+                    <th>กำหนด</th>
+                    <th>แจ้งเมื่อ</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in tickets %}
+                <tr>
+                    <td>#{{ t.id }}</td>
+                    <td>{{ t.reporter }}</td>
+                    <td>{{ t.department }}</td>
+                    <td>{{ t.summary or t.message }}</td>
+                    <td>
+                        {% if t.status == "closed" and t.cancelled_at %}
+                        <span class="badge badge-cancelled">ยกเลิก</span>
+                        {% elif t.status == "closed" %}
+                        <span class="badge badge-closed">ปิดแล้ว</span>
+                        {% else %}
+                        <span class="badge badge-open">เปิดอยู่</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ t.due_date or "—" }}</td>
+                    <td>{{ t.created_at[:16] | replace("T", " ") }}</td>
+                    <td><a class="button" href="/tickets/{{ t.id }}?token={{ token }}">แก้ไข</a></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="empty-note">ยังไม่มีทิกเก็ตครับ</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

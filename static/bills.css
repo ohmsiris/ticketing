@@ -114,6 +114,16 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .badge-pending_review { color: var(--pending); background: var(--pending-bg); }
 .badge-verified { color: var(--verified); background: var(--verified-bg); }
 
+/* Ticket statuses (open/closed/cancelled) are a different vocabulary
+   from the review-queue pages' pending_review/verified -- same color
+   roles reused (open~pending, closed~verified) but cancelled gets its
+   own distinct look rather than folding into "closed", same reasoning
+   as app/dashboard.py's old _status_label had for telling a genuine
+   close apart from a voided ticket. */
+.badge-open { color: var(--pending); background: var(--pending-bg); }
+.badge-closed { color: var(--verified); background: var(--verified-bg); }
+.badge-cancelled { color: var(--flag); background: var(--accent-soft); }
+
 .button {
     display: inline-block;
     padding: 6px 14px;
@@ -125,6 +135,17 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
     font-weight: 600;
 }
 .button:hover { opacity: 0.9; }
+
+.original-message {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    color: var(--muted);
+    font-size: 14px;
+    white-space: pre-wrap;
+    margin: 0 0 18px;
+}
 
 .field-grid {
     display: grid;

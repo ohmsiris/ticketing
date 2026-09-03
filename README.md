@@ -155,15 +155,28 @@ data/
   tickets.db                        created automatically on first run
 ```
 
-## Viewing all tickets
+## Viewing and editing tickets
 
 `GET /tickets` on your deployed URL shows every ticket (open + closed) in
-one table: id, reporter, department, summary, status, due date, filed time.
-It's plain server-rendered HTML, no login system -- protected only by a
-shared token via `DASHBOARD_TOKEN` (see `.env.example`). Visit it as
+one table: id, reporter, department, summary, status, due date, filed
+time, with an "แก้ไข" (edit) link per row. Protected only by a shared
+token via `DASHBOARD_TOKEN` (see `.env.example`) -- visit it as
 `https://your-app.up.railway.app/tickets?token=<DASHBOARD_TOKEN>`. If
 `DASHBOARD_TOKEN` is left blank the page is open to anyone with the URL,
 which is fine for local poking but not recommended once deployed.
+
+The edit page (`/tickets/{id}?token=...`) lets you change the summary,
+department, due date, and reminder lead-time directly, and toggle status
+between open and closed (closed = the work actually got done -- same
+meaning as texting "ปิด" to the bot). A separate "ยกเลิกทิกเก็ตนี้" button
+voids the ticket entirely (a mistake, a duplicate, plans changed) --
+distinct from closing, same distinction the LINE-text flow already makes,
+with its own confirm dialog. Not scoped by reporter/department like the
+LINE flow is -- the page itself is already gated to the one manager, who
+can edit/close/cancel/reopen anything from it. Every change that isn't
+the manager editing their own ticket pushes a LINE notice to whoever
+originally reported it, so they see the update without needing to check
+the webpage themselves.
 
 ### Syncing to Google Sheets
 

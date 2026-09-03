@@ -255,6 +255,100 @@ def cancel_most_recent_missing_due_date_ticket(reporter: str) -> Optional[dict]:
         conn.close()
 
 
+def get_ticket(ticket_id: int) -> Optional[dict]:
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+        return _row_to_dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# --- Admin-only mutations for the /tickets management webpage
+# (app/tickets_routes.py). Deliberately NOT reporter/department-scoped
+# like close_ticket_by_id/cancel_ticket_by_id above -- those enforce who a
+# LINE message from a given sender is allowed to touch; this page is
+# already gated by DASHBOARD_TOKEN to the one manager, who should be able
+# to edit/close/cancel/reopen anything from it. ---
+
+
+def admin_update_ticket(ticket_id: int, fields: dict) -> Optional[dict]:
+    """Applies a manager's direct field edits (summary/department/
+    due_date/remind_days_before) from the ticket-management webpage.
+    Returns the updated ticket, or None if it doesn't exist. Does NOT
+    touch status -- see admin_close_ticket/admin_reopen_ticket/
+    admin_cancel_ticket for that, kept as separate explicit actions so
+    the webpage's notification wording can describe what actually
+    happened instead of guessing from a field diff."""
+    conn = get_conn()
+    try:
+        existing = conn.execute("SELECT id FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+        if existing is None:
+            return None
+        if fields:
+            set_clause = ", ".join(f"{k} = ?" for k in fields)
+            conn.execute(f"UPDATE tickets SET {set_clause} WHERE id = ?", (*fields.values(), ticket_id))
+            conn.commit()
+        row = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+        return _row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def admin_close_ticket(ticket_id: int) -> Optional[dict]:
+    """Closes any open ticket regardless of reporter/department -- see
+    module note above. Returns None (no-op) if it's already closed or
+    doesn't exist, so the caller can tell "actually closed just now"
+    apart from "nothing to do"."""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM tickets WHERE id = ? AND status = 'open'", (ticket_id,)).fetchone()
+        if row is None:
+            return None
+        conn.execute("UPDATE tickets SET status = 'closed' WHERE id = ?", (ticket_id,))
+        conn.commit()
+        return _row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def admin_cancel_ticket(ticket_id: int) -> Optional[dict]:
+    """Voids any open ticket regardless of reporter/department -- same
+    status='closed' + cancelled_at shape as cancel_ticket_by_id (a soft
+    void, NOT a delete: unlike a still-unverified OCR bill/slip/purchase,
+    a ticket is a real logged report from the moment it's created, and
+    stays in history either way -- see module note above for the no-
+    permission-scoping reasoning)."""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM tickets WHERE id = ? AND status = 'open'", (ticket_id,)).fetchone()
+        if row is None:
+            return None
+        now = _utc_now_iso()
+        conn.execute("UPDATE tickets SET status = 'closed', cancelled_at = ? WHERE id = ?", (now, ticket_id))
+        conn.commit()
+        return _row_to_dict(row)
+    finally:
+        conn.close()
+
+
+def admin_reopen_ticket(ticket_id: int) -> Optional[dict]:
+    """Reopens a closed (or cancelled) ticket -- a capability that has no
+    LINE-text equivalent anywhere else in this app. Clears cancelled_at
+    too, since a reopened ticket is neither genuinely done nor void
+    anymore. Returns None if it's already open or doesn't exist."""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM tickets WHERE id = ? AND status = 'closed'", (ticket_id,)).fetchone()
+        if row is None:
+            return None
+        conn.execute("UPDATE tickets SET status = 'open', cancelled_at = NULL WHERE id = ?", (ticket_id,))
+        conn.commit()
+        return _row_to_dict(row)
+    finally:
+        conn.close()
+
+
 def get_all_tickets() -> list[dict]:
     """
     Every ticket, open and closed, most-relevant first: open before closed,
