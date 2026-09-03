@@ -123,21 +123,32 @@ def handle_message_event(event: dict) -> None:
     text = message.get("text", "")
 
     # On-demand digest commands, Ohm only. Checked before we bother calling
-    # Claude, since these are exact commands, not natural-language content.
-    # "open tickets": how long each has been sitting open. "งานทั้งหมด":
-    # everything open right now sorted by due date -- different angle on
-    # the same underlying open tickets, not a duplicate of the other.
-    # "ลิงก์"/"link": every management-page URL in one message, so Ohm
-    # never has to go dig a token out of Railway/notes.
+    # Claude, since these are exact commands, not natural-language content
+    # -- and specifically BEFORE classify() so a near-miss phrasing never
+    # falls through and gets misread as a fresh report (reported live:
+    # "ลิงก์ทิกเก็ต", one keystroke away from matching, fell all the way
+    # through to classify() and came back as a phantom new ticket).
+    # "open tickets": how long each has been sitting open. "งานทั้งหมด" /
+    # "รายการทั้งหมด": everything open right now sorted by due date --
+    # different angle on the same underlying open tickets, not a
+    # duplicate of "open tickets"; two accepted phrasings since both have
+    # been typed for the same thing. "ลิงก์"/"link": every management-page
+    # URL in one message, so Ohm never has to go dig a token out of
+    # Railway/notes -- matched anywhere in the message (substring, not an
+    # exact phrase), specifically so natural phrasings like "ลิงก์ทิกเก็ต"
+    # ("link" + "ticket") or "ขอลิงก์" ("please, a link") still trigger it
+    # rather than needing the bare word alone. Real false-positive risk is
+    # negligible -- "ลิงก์"/"link" isn't a word that would ever show up in
+    # a genuine equipment/staff report for this business.
     stripped = text.strip()
     if reporter == "ohm" and stripped.lower() == "open tickets":
         open_tickets = tickets.get_open_tickets(min_age_hours=0)
         reply_message(reply_token, [strings.open_tickets_digest(open_tickets)])
         return
-    if reporter == "ohm" and stripped == "งานทั้งหมด":
+    if reporter == "ohm" and stripped in ("งานทั้งหมด", "รายการทั้งหมด"):
         reply_message(reply_token, [strings.all_open_tickets_digest(tickets.get_all_open_tickets_by_due_date())])
         return
-    if reporter == "ohm" and stripped.lower() in ("ลิงก์", "link"):
+    if reporter == "ohm" and ("ลิงก์" in stripped or "link" in stripped.lower()):
         reply_message(reply_token, [_admin_links_message()])
         return
 
