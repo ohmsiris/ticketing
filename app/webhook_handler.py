@@ -183,6 +183,20 @@ def handle_message_event(event: dict) -> None:
     # THIS sender.
     open_tickets_for_reporter = tickets.get_open_tickets_for_reporter(reporter)
     awaiting_due_date = any(t["due_date"] is None for t in open_tickets_for_reporter)
+    # The SPECIFIC ticket that boolean refers to -- the same one
+    # set_due_date() would actually target (most recently created, still
+    # missing a due date). Reported live: awaiting_due_date was computed
+    # correctly but never actually told to the model, which had to infer
+    # "there's a pending due-date question" purely by re-reading
+    # conversation_history's tail -- with real conversation history
+    # (multiple tickets, multiple back-and-forths) that's a much weaker
+    # signal than just naming the ticket outright. Naming it explicitly
+    # (see _awaiting_due_date_context in classifier.py) closes that gap
+    # without giving up conversation_history for everything else it's
+    # still good for (cancel-during-due-date-flow, natural context, etc).
+    pending_due_date_ticket = next(
+        (t for t in reversed(open_tickets_for_reporter) if t["due_date"] is None), None
+    )
     actionable_tickets = tickets.get_actionable_tickets_for(reporter)
 
     # Maintenance-completion matching is scoped to Ohm only for now (see
@@ -200,6 +214,7 @@ def handle_message_event(event: dict) -> None:
     result = classify(
         text,
         awaiting_due_date=awaiting_due_date,
+        pending_due_date_ticket=pending_due_date_ticket,
         open_tickets=actionable_tickets,
         conversation_history=history,
         maintenance_tasks=maintenance_tasks,

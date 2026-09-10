@@ -244,6 +244,36 @@ def _open_tickets_context(open_tickets: Optional[list]) -> str:
     return "\n".join(lines)
 
 
+def _awaiting_due_date_context(pending_ticket: Optional[dict]) -> str:
+    """
+    Explicitly names the pending due-date question, when there is one --
+    see classify()'s docstring for why this exists (this used to be
+    inferred purely from conversation_history, which turned out to be too
+    weak a signal on its own). Deliberately spells out the boundary with
+    close_ticket/cancel_ticket/a different new_ticket too, not just "this
+    might be a due-date reply" -- a short reply like "วันนี้" or a bare
+    number has essentially no content to go on except this context, so it
+    needs to be unambiguous about which reading wins by default.
+    """
+    if pending_ticket is None:
+        return ""
+    desc = pending_ticket.get("summary") or pending_ticket["message"]
+    return (
+        f"\n\nPENDING DUE-DATE QUESTION: you just asked this person for a due date for "
+        f"ticket #{pending_ticket['id']} (\"{desc}\"), and this message is their reply to "
+        f"that. If it reads as ANSWERING that question -- a bare relative offset "
+        f"(\"อีก 3 วัน\"), a bare date, \"วันนี้\"/\"พรุ่งนี้\"/a day name, or a reminder-lead-"
+        f"time-only message -- classify it as due_date_reply for ticket #{pending_ticket['id']}, "
+        f"even though it's short and doesn't repeat the ticket number or its content. Only "
+        f"classify it as something else (close_ticket, cancel_ticket, a new_ticket for "
+        f"different work, etc.) when the message clearly does that instead -- e.g. it "
+        f"explicitly names a DIFFERENT ticket number, or clearly describes a DIFFERENT task "
+        f"than \"{desc}\" rather than just giving a date for this one. A message that "
+        f"describes new/different work AND happens to end with a date word (e.g. \"...วันนี้\") "
+        f"is a new_ticket with that date embedded, NOT a due_date_reply for this ticket."
+    )
+
+
 def _maintenance_context(maintenance_tasks: Optional[list]) -> str:
     """
     Builds the context block listing the recurring-maintenance catalog, so
@@ -447,6 +477,7 @@ def _classify_once(system: str, messages: list, awaiting_due_date: bool) -> tupl
 def classify(
     message: str,
     awaiting_due_date: bool = False,
+    pending_due_date_ticket: Optional[dict] = None,
     open_tickets: Optional[list] = None,
     conversation_history: Optional[list] = None,
     maintenance_tasks: Optional[list] = None,
@@ -476,12 +507,23 @@ def classify(
     fabricating a phantom ticket out of what was never a candidate to be
     a fresh report.
 
-    awaiting_due_date: still used ONLY for that fallback default above (a
-    cheap, deterministic DB check -- see get_open_tickets_for_reporter in
-    tickets.py) -- it no longer shapes the prompt itself. That job now
-    belongs to conversation_history below, which the model reads directly
-    instead of us hand-summarizing "the bot just asked about a due date"
-    into prose every time a new scenario like that comes up.
+    awaiting_due_date: used for the fallback default (see above) AND to
+    decide whether pending_due_date_ticket gets surfaced in the prompt
+    (see _awaiting_due_date_context) -- both a cheap, deterministic DB
+    check (get_open_tickets_for_reporter in tickets.py).
+
+    pending_due_date_ticket: the specific ticket that boolean refers to
+    (a dict with at least id/message/summary), the SAME ticket
+    set_due_date() would actually target if this message turns out to be
+    a due_date_reply -- see webhook_handler.py's computation of it.
+    Reported live: awaiting_due_date was being computed correctly but
+    never actually told to the model -- it had to infer "there's a
+    pending due-date question" purely by re-reading conversation_history's
+    tail, which is a much weaker signal once that history has any real
+    depth to it (multiple tickets, multiple back-and-forths). Naming the
+    ticket explicitly closes that gap without giving up
+    conversation_history for everything else it's still good for
+    (cancel-during-due-date-flow, natural context, etc).
 
     open_tickets: this sender's currently open tickets (list of dicts with
     at least id/message/summary), so a close_ticket message can be matched
@@ -504,6 +546,8 @@ def classify(
     system = SYSTEM_PROMPT.format(today=today, tz=TIMEZONE)
     system += _open_tickets_context(open_tickets)
     system += _maintenance_context(maintenance_tasks)
+    if awaiting_due_date:
+        system += _awaiting_due_date_context(pending_due_date_ticket)
 
     messages = [{"role": turn["role"], "content": turn["text"]} for turn in (conversation_history or [])]
     messages.append({"role": "user", "content": message})
@@ -550,6 +594,7 @@ def classify(
             {
                 "raw_message": message,
                 "awaiting_due_date": awaiting_due_date,
+                "pending_due_date_ticket_id": pending_due_date_ticket["id"] if pending_due_date_ticket else None,
                 "open_ticket_ids": [t["id"] for t in (open_tickets or [])],
                 "history_turns": len(conversation_history or []),
                 "model_output": raw_text,
