@@ -33,6 +33,32 @@ def _status_label(t: dict) -> str:
     return STATUS_LABEL.get(t["status"], t["status"])
 
 
+def render_maintenance_csv(completions: list[dict]) -> str:
+    """
+    Same columns as sheets_client.MAINTENANCE_HEADER, in the same order,
+    so a one-time paste/import of this CSV lines up with whatever the
+    live per-completion sync appends afterward. See
+    app/maintenance_routes.py for the route (one-time backfill use --
+    not polled by anything the way tickets.csv is).
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["completed_date", "category", "task", "reporter", "note", "logged_at"])
+    for c in completions:
+        completed_local = _bangkok_str(c["completed_at"])
+        writer.writerow(
+            [
+                completed_local.split(" ")[0],
+                c["category"],
+                c["name"],
+                c["reporter"],
+                c["note"] or "",
+                completed_local,
+            ]
+        )
+    return buf.getvalue()
+
+
 def render_tickets_csv(tickets: list[dict]) -> str:
     """
     CSV for Google Sheets' =IMPORTDATA(url) -- pull this URL (with

@@ -21,6 +21,7 @@ from app.bills_routes import router as bills_router
 from app.db import init_db
 from app.jobs import start_scheduler
 from app.line_client import verify_signature
+from app.maintenance_routes import router as maintenance_router
 from app.slips_routes import router as slips_router
 from app.supplies_routes import router as supplies_router
 from app.tickets_routes import router as tickets_router
@@ -49,6 +50,7 @@ app.include_router(bills_router)
 app.include_router(slips_router)
 app.include_router(supplies_router)
 app.include_router(tickets_router)
+app.include_router(maintenance_router)
 
 
 @app.get("/health")

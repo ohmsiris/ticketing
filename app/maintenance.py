@@ -236,6 +236,35 @@ def resolve_completed_at(days_ago: Optional[int], calendar_date: Optional[str]) 
     return noon.astimezone(timezone.utc).isoformat()
 
 
+def get_all_completions() -> list[dict]:
+    """
+    Every logged completion ever, oldest first, joined with its task's
+    name/category (as they are NOW -- maintenance_tasks isn't
+    versioned, so a task renamed/recategorized by a later
+    seed_default_tasks() sync shows its current name here, not whatever
+    it was called at the time). Includes completions for retired
+    (active=0) tasks -- history isn't dropped just because a category
+    got cut from the digest. Feeds the one-time backfill into the
+    Maintenance Google Sheet (see app/dashboard.py's
+    render_maintenance_csv, app/maintenance_routes.py) -- the live
+    per-completion sync in app/webhook_handler.py doesn't use this at
+    all, it appends one row right as each new completion comes in.
+    """
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT l.completed_at, l.reporter, l.note, t.name, t.category
+            FROM maintenance_log l
+            JOIN maintenance_tasks t ON t.id = l.task_id
+            ORDER BY l.completed_at
+            """
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def get_due_tasks(lookahead_days: int = 0) -> list[dict]:
     """
     Active, SCHEDULED tasks (interval_days > 0 -- condition-triggered ones
