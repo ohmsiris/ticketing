@@ -96,35 +96,16 @@ DEFAULT_TASKS: list[dict] = [
     {"name": "เป่าคอนเดนเซอร์ ตู้บน (พัดลมคู่)", "category": "Cold Room Compressor", "interval_days": 30, "notes": None},
     {"name": "เปลี่ยนน้ำมันคอมเพรสเซอร์ ตู้แพ็ค", "category": "Cold Room Compressor", "interval_days": 180, "notes": None},
     {"name": "เป่าคอนเดนเซอร์ ตู้แพ็ค", "category": "Cold Room Compressor", "interval_days": 30, "notes": None},
-    # --- Sediment Pond -- drain corrected to daily (was every-2-days guess) ---
-    {"name": "ระบายน้ำบ่อตกตะกอน", "category": "Sediment Pond", "interval_days": 1, "notes": None},
-    {"name": "ทำความสะอาดด้านในบ่อตกตะกอน", "category": "Sediment Pond", "interval_days": 30, "notes": None},
-    # --- y-strainer -- corrected to weekly (was a monthly guess) ---
-    {"name": "ล้างวายสแตนเนอร์", "category": "y-strainer", "interval_days": 7, "notes": None},
-    # --- Cold Room Cleaning -- corrected to weekly (was a monthly guess);
-    # done by FOH bookkeepers, not necessarily Ohm directly ---
-    {"name": "ทำความสะอาดห้องเย็นตู้บน", "category": "Cold Room Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ทำความสะอาดห้องเย็นตู้ล่าง", "category": "Cold Room Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ทำความสะอาดห้องเย็นตู้แพ็ค", "category": "Cold Room Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
-    # --- Chlorine Check -- confirmed daily; FOH bookkeepers ---
-    {"name": "ตรวจ Chlorine อ่างล้างเท้า บ่อซอง", "category": "Chlorine Check", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ตรวจ Chlorine อ่างล้างเท้า เครื่อง 1-2", "category": "Chlorine Check", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ตรวจ Chlorine อ่างล้างเท้า เครื่อง 3-4", "category": "Chlorine Check", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ตรวจ Chlorine อ่างล้างกระสอบ", "category": "Chlorine Check", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    # --- Water QC -- confirmed daily; FOH bookkeepers ---
-    {"name": "ตรวจน้ำผลิต (Chlorine/สารละลายรวม/ความกระด้าง/PH)", "category": "Water QC", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    # --- FOH Cleaning -- daily/weekly/monthly confirmed as originally
-    # guessed; FOH bookkeepers except the fire extinguisher check ---
-    {"name": "ทำความสะอาดพื้นลานด้านหน้า", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ทำความสะอาดพื้นไลน์ผลิตน้ำแข็ง", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ทำความสะอาดห้องน้ำพนักงาน", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ทำความสะอาดอ่างล้างเท้า (หน้าโรง)", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ทำความสะอาดอ่างล้างกระสอบ (หน้าโรง)", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "เติมคลอรีน 4 จุด", "category": "FOH Cleaning", "interval_days": 1, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ทำความสะอาดม่าน", "category": "FOH Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ทำความสะอาดผนัง", "category": "FOH Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ทำความสะอาดบ่อจุ่มซอง", "category": "FOH Cleaning", "interval_days": 7, "notes": "FOH Bookkeepers take care of this."},
-    {"name": "ตรวจสอบถังดับเพลิง", "category": "FOH Cleaning", "interval_days": 30, "notes": None},
+    # --- Sediment Pond, y-strainer, Cold Room Cleaning, Chlorine Check,
+    # Water QC, FOH Cleaning: dropped 2026-09-11 per user request -- daily
+    # digest was too noisy, and these are non-machine/FOH-bookkeeper-owned
+    # tasks anyway (most were already annotated "FOH Bookkeepers take care
+    # of this."). User asked to stop tracking them entirely, not just mute
+    # the reminder -- seed_default_tasks() deactivates (active=0) any row
+    # no longer listed here, which also removes them from
+    # get_active_tasks()'s classifier match candidates and get_due_tasks()'s
+    # digest query in one move. Already-logged completions for these are
+    # preserved in maintenance_log, just orphaned from an active task. ---
 ]
 
 
