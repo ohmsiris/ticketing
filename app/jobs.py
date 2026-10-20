@@ -19,6 +19,10 @@ The scheduled jobs. All pushed to Ohm only, except #4:
    (that one nagged all day and got noticed) -- unlike #2/#3, no "already
    reminded" guard either, since the point is to re-show whatever's still
    outstanding each time it fires.
+   NOT SCHEDULED while MOM_LINE_USER_ID is blank (see start_scheduler) --
+   switched off 2026-10-20 when her ID was removed, since there's nobody to
+   send it to. It comes back by itself, after the next deploy, if the ID is
+   ever set again.
 5. roster_refresh -- once a day at 03:00 Asia/Bangkok (quiet hours), re-
    pulls app/vehicle_roster.csv from the real Drivers Google Sheet so
    plate/truck-number edits made there show up in bill matching without
@@ -124,11 +128,17 @@ def start_scheduler() -> BackgroundScheduler:
         CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
         id="due_soon_digest",
     )
-    scheduler.add_job(
-        mom_shared_reminder,
-        CronTrigger(hour="8,12,16", minute=0, timezone=TIMEZONE),
-        id="mom_shared_reminder",
-    )
+    # Only scheduled when there's someone to send it to. With MOM_LINE_USER_ID
+    # blank the job used to keep running three times a day, building a digest
+    # and then having push_message() discard it with a warning.
+    if settings.mom_line_user_id:
+        scheduler.add_job(
+            mom_shared_reminder,
+            CronTrigger(hour="8,12,16", minute=0, timezone=TIMEZONE),
+            id="mom_shared_reminder",
+        )
+    else:
+        logger.info("MOM_LINE_USER_ID not set -- mom_shared_reminder is switched off")
     scheduler.add_job(
         roster_refresh,
         CronTrigger(hour=3, minute=0, timezone=TIMEZONE),
